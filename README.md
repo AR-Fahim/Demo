@@ -1,297 +1,735 @@
-# C++ Exception Handling — Complete Guide
+# C++ File Handling Complete Guide
 
-> A compact, practical, start-to-advanced reference for exception handling in C++: syntax, semantics, best practices, examples, edge cases, and related APIs.
+## Core Concepts
 
----
+**File**: Persistent storage on disk. Data remains after program ends.
 
-## Quick map (what you'll find here)
-- Basic syntax: `throw`, `try`, `catch`
-- Standard exception types (`std::exception` family)
-- Custom exceptions (how & why)
-- Exception propagation & stack unwinding
-- Exception safety guarantees (no-throw, basic, strong)
-- `noexcept`, `std::terminate`, `std::exception_ptr`, nested exceptions
-- Interop with `new` and `std::nothrow`
-- Patterns: RAII, scope guards, translate-and-throw, error codes vs exceptions
-- Threading and exceptions (futures, `std::exception_ptr`)
-- Edge cases and gotchas (destructors, noexcept violations, slicing)
-- Checklist, tips, and concise API reference
+**Stream**: Flow of data between program and file. Think of it as a pipeline.
+
+**Buffer**: Temporary memory holding data before writing to disk (improves performance).
 
 ---
 
-# 1. Basic syntax & semantics
+## Three Main Classes
 
-### Throwing and catching
 ```cpp
-#include <iostream>
-#include <stdexcept>
+#include <fstream>
 
-void f() {
-    throw std::runtime_error("boom");
+ifstream  // Input File Stream (reading)
+ofstream  // Output File Stream (writing)
+fstream   // Both read and write
+```
+
+---
+
+## Opening Files
+
+### Method 1: Constructor
+```cpp
+ifstream inFile("data.txt");
+ofstream outFile("output.txt");
+fstream file("data.txt", ios::in | ios::out);
+```
+
+### Method 2: open() function
+```cpp
+ifstream inFile;
+inFile.open("data.txt");
+```
+
+### File Modes (ios flags)
+
+| Mode | Purpose | Details |
+|------|---------|---------|
+| `ios::in` | Read | File must exist |
+| `ios::out` | Write | Creates/truncates file |
+| `ios::app` | Append | Writes at end, creates if missing |
+| `ios::ate` | At End | Opens and moves to end |
+| `ios::trunc` | Truncate | Deletes existing content |
+| `ios::binary` | Binary mode | No text transformations |
+
+**Combine modes with `|` operator:**
+```cpp
+fstream file("data.txt", ios::in | ios::out | ios::binary);
+```
+
+---
+
+## Checking File Status
+
+```cpp
+// Always check if file opened successfully
+if (!inFile.is_open()) {
+    cerr << "Error opening file!" << endl;
+    return 1;
 }
 
-int main() {
-    try {
-        f();
-    } catch (const std::exception& e) {
-        std::cerr << "caught: " << e.what() << '\n';
+// Alternative
+if (inFile.fail()) {
+    // Handle error
+}
+
+// Check if file exists before opening
+#include <fstream>
+bool fileExists(const string& name) {
+    ifstream f(name);
+    return f.good();
+}
+```
+
+---
+
+## Closing Files
+
+```cpp
+inFile.close();  // Flushes buffer and releases file
+```
+
+**Note**: Files auto-close when object goes out of scope (RAII), but explicit closing is good practice.
+
+---
+
+## Reading Files
+
+### 1. Character by Character
+```cpp
+char ch;
+while (inFile.get(ch)) {  // Better than >> for whitespace
+    cout << ch;
+}
+```
+
+### 2. Word by Word
+```cpp
+string word;
+while (inFile >> word) {  // Skips whitespace
+    cout << word << endl;
+}
+```
+
+### 3. Line by Line
+```cpp
+string line;
+while (getline(inFile, line)) {  // Reads entire line
+    cout << line << endl;
+}
+
+// With custom delimiter
+while (getline(inFile, line, ';')) {  // Reads until semicolon
+    cout << line << endl;
+}
+```
+
+### 4. Fixed-size block
+```cpp
+char buffer[100];
+inFile.read(buffer, 100);  // Reads 100 bytes
+int bytesRead = inFile.gcount();  // Actual bytes read
+```
+
+### 5. Entire file at once
+```cpp
+ifstream inFile("data.txt");
+stringstream buffer;
+buffer << inFile.rdbuf();  // Read entire file
+string content = buffer.str();
+```
+
+---
+
+## Writing Files
+
+### 1. Basic writing
+```cpp
+ofstream outFile("output.txt");
+outFile << "Hello World" << endl;
+outFile << 42 << " " << 3.14 << endl;
+```
+
+### 2. Writing binary data
+```cpp
+int num = 100;
+outFile.write((char*)&num, sizeof(num));
+```
+
+### 3. Formatted output
+```cpp
+#include <iomanip>
+outFile << setw(10) << setfill('0') << 42;  // Output: 0000000042
+outFile << fixed << setprecision(2) << 3.14159;  // Output: 3.14
+```
+
+---
+
+## File Pointers (Navigation)
+
+Two pointers: **get pointer** (read) and **put pointer** (write)
+
+### tellg() / tellp() - Get current position
+```cpp
+streampos pos = inFile.tellg();  // Get position (reading)
+streampos pos = outFile.tellp(); // Put position (writing)
+```
+
+### seekg() / seekp() - Move position
+```cpp
+// From beginning
+inFile.seekg(10, ios::beg);  // Move to byte 10
+
+// From current position
+inFile.seekg(5, ios::cur);   // Move 5 bytes forward
+
+// From end
+inFile.seekg(-10, ios::end); // 10 bytes before end
+
+// Absolute position
+inFile.seekg(0, ios::beg);   // Move to start
+inFile.seekg(0, ios::end);   // Move to end
+```
+
+### Getting file size
+```cpp
+inFile.seekg(0, ios::end);
+streampos size = inFile.tellg();
+inFile.seekg(0, ios::beg);  // Reset to beginning
+```
+
+---
+
+## Complete Methods Reference
+
+### Stream State Functions
+```cpp
+bool good()      // No errors
+bool eof()       // End of file reached
+bool fail()      // Operation failed
+bool bad()       // Read/write error
+void clear()     // Reset error flags
+```
+
+### Input Methods (ifstream/fstream)
+```cpp
+get(char& ch)                    // Read single character
+get(char* buffer, int n)         // Read n-1 chars or until newline
+getline(char* buffer, int n)     // Read line (n-1 chars max)
+read(char* buffer, int n)        // Read n bytes (binary)
+gcount()                         // Get number of chars from last read
+peek()                           // Look at next char without extracting
+putback(char ch)                 // Put character back
+unget()                          // Put last read char back
+ignore(int n = 1, int delim = EOF) // Skip n chars or until delim
+```
+
+### Output Methods (ofstream/fstream)
+```cpp
+put(char ch)                     // Write single character
+write(const char* buffer, int n) // Write n bytes (binary)
+flush()                          // Force buffer write to disk
+```
+
+### File Operations
+```cpp
+open(filename, mode)             // Open file
+close()                          // Close file
+is_open()                        // Check if file is open
+```
+
+### Position Methods
+```cpp
+tellg()                          // Get read position
+tellp()                          // Get write position
+seekg(pos)                       // Set read position (absolute)
+seekg(offset, direction)         // Set read position (relative)
+seekp(pos)                       // Set write position (absolute)
+seekp(offset, direction)         // Set write position (relative)
+```
+
+---
+
+## Practical Examples
+
+### Example 1: Copy file
+```cpp
+void copyFile(const string& source, const string& dest) {
+    ifstream src(source, ios::binary);
+    ofstream dst(dest, ios::binary);
+    
+    if (!src || !dst) {
+        cerr << "Error opening files!" << endl;
+        return;
     }
+    
+    dst << src.rdbuf();  // Efficient copy
 }
 ```
 
-- `throw <expression>;` creates (or rethrows) an exception object.
-- `try { /* code */ } catch(type& e) { /* handler */ }` handles thrown exceptions that match the declared type.
-- Catch **by reference** (`const T&`) to avoid slicing and unnecessary copies.
-- The catch-list is tested **in order**. The first matching handler runs.
-- `catch (...)` matches any exception (use sparingly for last-resort cleanup).
-
-### Rethrowing
-- `throw;` inside a `catch` rethrows the current exception (preserves original type and stack).
-- `throw e;` (where `e` is the caught object) makes a new copy — less desirable.
-
-
-# 2. Standard exception types (important ones)
-- `std::exception` — base class, `virtual const char* what() const noexcept;`
-- `std::bad_alloc` — memory allocation failure (`new`)
-- `std::bad_exception` — used with throw specifications (rare / legacy)
-- `std::runtime_error`, `std::logic_error` and their derived types:
-  - `std::out_of_range`, `std::invalid_argument`, `std::domain_error`, `std::length_error`, `std::overflow_error`, `std::underflow_error`.
-- I/O: `std::ios_base::failure` (streams)
-
-Use the standard hierarchy when appropriate — they integrate with libraries and convey intent.
-
-
-# 3. Custom exception classes
-Prefer deriving from `std::exception` (or `std::runtime_error`) and override `what()`.
-
+### Example 2: Count lines, words, characters
 ```cpp
-#include <stdexcept>
+void analyzeFile(const string& filename) {
+    ifstream file(filename);
+    int lines = 0, words = 0, chars = 0;
+    string line, word;
+    
+    while (getline(file, line)) {
+        lines++;
+        chars += line.length();
+        istringstream iss(line);
+        while (iss >> word) words++;
+    }
+    
+    cout << "Lines: " << lines << ", Words: " << words 
+         << ", Chars: " << chars << endl;
+}
+```
 
-class MyError : public std::runtime_error {
-public:
-    explicit MyError(const std::string& msg) : runtime_error(msg) {}
+### Example 3: CSV file handling
+```cpp
+vector<vector<string>> readCSV(const string& filename) {
+    ifstream file(filename);
+    vector<vector<string>> data;
+    string line, cell;
+    
+    while (getline(file, line)) {
+        vector<string> row;
+        istringstream lineStream(line);
+        while (getline(lineStream, cell, ',')) {
+            row.push_back(cell);
+        }
+        data.push_back(row);
+    }
+    return data;
+}
+```
+
+### Example 4: Binary file (struct)
+```cpp
+struct Student {
+    char name[50];
+    int age;
+    float gpa;
 };
+
+// Writing
+ofstream out("students.dat", ios::binary);
+Student s = {"Alice", 20, 3.8};
+out.write((char*)&s, sizeof(Student));
+
+// Reading
+ifstream in("students.dat", ios::binary);
+Student s;
+in.read((char*)&s, sizeof(Student));
 ```
 
-Guidelines:
-- Make constructors `explicit` to avoid implicit conversions.
-- Keep them lightweight and copyable.
-- Make `what()` return a null-terminated string; reuse `std::string`'s `c_str()` via base class.
-
-
-# 4. Exception propagation and stack unwinding
-- When an exception is thrown and not caught in the current function, the function's stack frame is unwound: local objects are destroyed (destructors run).
-- This guarantees RAII cleanup for objects with automatic storage duration.
-- If a destructor throws during stack unwinding, `std::terminate()` is called (see edge cases).
-
-Example: RAII ensures resources free even when exceptions occur.
-
-
-# 5. Exception safety guarantees (levels)
-Design functions with one of these guarantees:
-
-1. **No-throw / Strong guarantee** (`noexcept`): Operation never throws. Use when failure must not propagate. E.g., destructors, `swap()` for movable types if possible.
-2. **Strong guarantee**: If operation fails, program state is unchanged (transaction-like).
-3. **Basic guarantee**: Invariants remain; no resource leaks, but state may be modified.
-4. **No guarantee**: Nothing promised — avoid in library interfaces.
-
-Example (strong guarantee using copy-and-swap idiom):
+### Example 5: Random access file
 ```cpp
-void assign(MyType& dest, MyType const& src) {
-    MyType tmp(src);        // may throw, leaves dest unchanged
-    swap(dest, tmp);        // noexcept swap
+void updateRecord(const string& filename, int recordNum, const Student& s) {
+    fstream file(filename, ios::in | ios::out | ios::binary);
+    
+    // Move to specific record
+    file.seekp(recordNum * sizeof(Student), ios::beg);
+    file.write((char*)&s, sizeof(Student));
 }
 ```
 
-
-# 6. `noexcept` and its effects
-- `noexcept` marks a function as not throwing: `void f() noexcept`.
-- If an exception leaves a `noexcept` function, `std::terminate()` runs.
-- `noexcept(expr)` can be conditional; useful with templates.
-- The compiler may optimize code assuming `noexcept` functions do not throw.
-- Destructors are implicitly `noexcept` in modern C++ (unless defaulted differently).
-
-Tip: mark move constructors/`swap` as `noexcept` to enable optimizations in containers.
-
-
-# 7. `new`, `std::nothrow` and allocation failures
-- Default `new` throws `std::bad_alloc` on failure.
-- `new (std::nothrow) T` returns `nullptr` instead (no exception).
-- Prefer throwing `new` in idiomatic C++ unless you need super-low-level handling.
-
-
-# 8. Catching rules & best practices
-- Catch **specific exceptions** first, then broader ones.
-- Catch by `const&` unless you need to modify or rethrow by copy.
-- Avoid catching `std::exception` and swallowing it — at least log/rethrow.
-- Use `catch(...)` only for last-resort cleanup (or to rethrow as a typed exception).
-
-Example order:
+### Example 6: Append to file
 ```cpp
-try { ... }
-catch (const MyError& e) { }
-catch (const std::exception& e) { }
-catch (...) { }
-```
-
-
-# 9. Exceptions in constructors and destructors
-- If a constructor throws, the destructor is **not** called for that (partially constructed) object, but destructors are called for already-constructed members.
-- Throwing from a destructor during stack unwinding ⇒ `std::terminate()`.
-- Keep destructors `noexcept` and avoid throwing. If unavoidable, catch and swallow or call `std::terminate()` explicitly.
-
-
-# 10. std::exception_ptr, nested exceptions, and rethrowing
-- `std::exception_ptr` (capture current exception):
-  ```cpp
-  std::exception_ptr eptr;
-  try { throw; } catch(...) { eptr = std::current_exception(); }
-  // later: std::rethrow_exception(eptr);
-  ```
-- `std::nested_exception` and `std::throw_with_nested` attach nested causes. Use `std::rethrow_if_nested` to inspect.
-- Useful for preserving exception information across thread boundaries or layered APIs.
-
-
-# 11. Threads and exceptions
-- Exceptions cannot cross thread boundaries automatically. If a thread function throws and isn’t caught, `std::terminate()` is called.
-- `std::async` and `std::thread` with `std::promise`/`future` propagate exceptions via `std::exception_ptr` — call `future.get()` to rethrow in caller thread.
-
-Example with `async`:
-```cpp
-auto fut = std::async(std::launch::async, []{ throw std::runtime_error("fail"); return 42; });
-try { fut.get(); } catch (const std::exception& e) { /* handle */ }
-```
-
-
-# 12. Performance and when not to use exceptions
-- Throwing is relatively expensive; code that throws rarely is fine.
-- Avoid using exceptions for normal control flow (e.g., in tight loops).
-- For performance-critical or low-level code (embedded systems), prefer error codes.
-
-
-# 13. Interoperability: C API, noexcept, and cross-language
-- If C functions return error codes, wrap them and translate to exceptions at boundary.
-- Avoid letting exceptions cross C ABI boundaries — wrap and convert exceptions to error codes when crossing.
-
-
-# 14. Edge cases and gotchas
-- **Destructor throws during stack unwinding** → `std::terminate()`.
-- **Throwing in `noexcept` function** → `std::terminate()`.
-- **Object slicing**: catching by concrete type causes slicing; catch by reference.
-- **Order of catch clauses** matters; a base-class catch before derived-class prevents derived-handler.
-- **Exceptions in `constexpr` context**: not allowed in constant evaluation.
-- **Static initialization / exceptions**: if thrown during static init, `std::terminate()` may be called.
-
-
-# 15. Useful idioms & patterns
-
-### RAII (Resource Acquisition Is Initialization)
-Use destructors to release resources in case of exceptions.
-```cpp
-struct FileHandle { FILE* f; ~FileHandle() { if (f) fclose(f); } };
-```
-
-### Scope guard (simple)
-```cpp
-struct ScopeGuard { std::function<void()> onExit; ~ScopeGuard(){ if(onExit) onExit(); } };
-```
-
-### Translate-and-throw
-Catch low-level exceptions and rethrow a higher-level exception for API clarity.
-
-```cpp
-try { /* low-level */ }
-catch (const std::exception& e) {
-    throw MyAPIError(std::string("low-level: ") + e.what());
+void logMessage(const string& message) {
+    ofstream logFile("app.log", ios::app);
+    time_t now = time(0);
+    logFile << ctime(&now) << ": " << message << endl;
 }
 ```
-
-### Copy-and-swap for strong exception-safety
-See section 5 for example.
-
-### Preserve exception context across threads
-Capture `std::current_exception()` and send via `std::promise`/`future` or store `exception_ptr`.
-
-
-# 16. Minimal reference: functions and types
-- `throw expr;` — throw expression
-- `try { } catch (...) { }` — catch clauses
-- `throw;` — rethrow current
-- `std::exception` and derived types
-- `std::bad_alloc`, `std::runtime_error`, `std::logic_error`, `std::out_of_range`, `std::invalid_argument`, `std::ios_base::failure`
-- `std::nothrow` overload for `new`
-- `noexcept` operator and specifier
-- `std::current_exception()`, `std::rethrow_exception()`
-- `std::exception_ptr`, `std::nested_exception`, `std::throw_with_nested`, `std::rethrow_if_nested`
-- `std::terminate()`, `std::set_terminate()`
-- `std::uncaught_exceptions()` (count of active uncaught exceptions)
-
-
-# 17. Quick checklist (what to do / avoid)
-**Do:**
-- Catch by `const&`.
-- Prefer `std::exception`-derived types.
-- Use `noexcept` for move ops and swap when safe.
-- Use RAII for resource management.
-- Provide meaningful messages in exceptions.
-- Translate exceptions at API boundaries.
-
-**Avoid:**
-- Using exceptions for normal control flow.
-- Throwing from destructors during stack unwinding.
-- Catching everything and swallowing errors silently.
-- Letting exceptions cross C boundaries.
-
-
-# 18. Compact examples (patterns)
-
-### 1. Basic throw & catch
-```cpp
-try { throw std::runtime_error("err"); }
-catch (const std::exception& e) { std::cerr<<e.what(); }
-```
-
-### 2. Custom exception
-```cpp
-struct E : std::runtime_error { explicit E(std::string s):runtime_error(std::move(s)){} };
-```
-
-### 3. Preserve exception across thread
-```cpp
-std::exception_ptr ep;
-try { throw std::runtime_error("x"); }
-catch(...) { ep = std::current_exception(); }
-// send ep to another thread and rethrow there
-std::rethrow_exception(ep);
-```
-
-### 4. `noexcept` example
-```cpp
-void f() noexcept { throw std::runtime_error("oops"); } // calls std::terminate()
-```
-
-### 5. Copy-and-swap
-```cpp
-void assign(Foo& a, Foo const& b) {
-    Foo tmp(b);
-    swap(a, tmp); // noexcept
-}
-```
-
-
-# 19. Further reading (concept pointers you may want to study next)
-- Move semantics & `noexcept` interplay (why move should be `noexcept`)
-- Exception-safe container design
-- `std::future`/`std::promise` and exception propagation
-- Advanced diagnostics: `std::nested_exception`, stack traces (platform-specific)
 
 ---
 
-## End notes
-This document aims to be compact and practical. If you want, I can:
-- produce **short runnable examples** for any section (pick one),
-- create a **cheat-sheet** printable page (one-page summary), or
-- explain **specific failure scenarios** (e.g., exceptions in constructors/destructors) with annotated code.
+## Text vs Binary Mode
 
-Which one would you like next?
+### Text Mode (default)
+- Platform-specific newline conversion (`\n` ↔ `\r\n` on Windows)
+- Can't handle null bytes reliably
+- Good for human-readable files
 
+### Binary Mode (`ios::binary`)
+- No transformations
+- Exact byte-for-byte operations
+- Required for non-text files (images, executables)
+- **Always use for struct/class serialization**
+
+```cpp
+// Text mode
+ofstream textFile("data.txt");
+textFile << "Hello\n";  // May write "Hello\r\n" on Windows
+
+// Binary mode
+ofstream binFile("data.bin", ios::binary);
+binFile.write("Hello\n", 6);  // Writes exactly "Hello\n"
+```
+
+---
+
+## Error Handling Patterns
+
+### Pattern 1: Basic check
+```cpp
+ifstream file("data.txt");
+if (!file) {
+    cerr << "Cannot open file!" << endl;
+    return;
+}
+```
+
+### Pattern 2: Detailed error checking
+```cpp
+ifstream file("data.txt");
+if (file.fail()) {
+    if (errno == ENOENT) cerr << "File not found" << endl;
+    else if (errno == EACCES) cerr << "Permission denied" << endl;
+    else cerr << "Unknown error: " << errno << endl;
+}
+```
+
+### Pattern 3: RAII wrapper
+```cpp
+class FileGuard {
+    fstream file;
+public:
+    FileGuard(const string& name, ios::openmode mode) 
+        : file(name, mode) {
+        if (!file) throw runtime_error("Cannot open file");
+    }
+    ~FileGuard() { if (file.is_open()) file.close(); }
+    fstream& get() { return file; }
+};
+
+// Usage
+try {
+    FileGuard fg("data.txt", ios::in);
+    // Use fg.get() ...
+} catch (const exception& e) {
+    cerr << e.what() << endl;
+}
+```
+
+---
+
+## Common Pitfalls & Solutions
+
+### 1. Forgetting to check file status
+```cpp
+// ❌ Bad
+ifstream file("data.txt");
+file >> data;  // Might fail silently
+
+// ✅ Good
+ifstream file("data.txt");
+if (!file) { /* handle error */ }
+file >> data;
+```
+
+### 2. Not clearing error flags
+```cpp
+// After EOF or error, stream is in bad state
+file.clear();  // Reset flags before reusing
+file.seekg(0, ios::beg);  // Rewind
+```
+
+### 3. Mixing >> and getline()
+```cpp
+int num;
+string line;
+file >> num;        // Leaves '\n' in buffer
+getline(file, line); // Reads empty line!
+
+// Fix: Use ignore()
+file >> num;
+file.ignore(numeric_limits<streamsize>::max(), '\n');
+getline(file, line);
+```
+
+### 4. Buffer not flushed
+```cpp
+outFile << "Important data";
+// Program crashes before close() → data lost!
+
+// Fix: Flush explicitly
+outFile << "Important data" << flush;
+// Or use endl (writes '\n' + flush)
+outFile << "Important data" << endl;
+```
+
+### 5. Wrong binary mode
+```cpp
+// ❌ Reading struct in text mode
+ifstream file("data.dat");  // Missing ios::binary
+Student s;
+file.read((char*)&s, sizeof(s));  // Corrupted data!
+
+// ✅ Use binary mode
+ifstream file("data.dat", ios::binary);
+```
+
+### 6. Not checking read success
+```cpp
+// ❌ Assuming read succeeded
+file.read(buffer, 100);
+processData(buffer, 100);  // Might use garbage data
+
+// ✅ Check gcount()
+file.read(buffer, 100);
+int bytesRead = file.gcount();
+processData(buffer, bytesRead);
+```
+
+---
+
+## Performance Tips
+
+### 1. Use buffering wisely
+```cpp
+// Set custom buffer size (8KB)
+char buffer[8192];
+inFile.rdbuf()->pubsetbuf(buffer, sizeof(buffer));
+```
+
+### 2. Read in chunks (faster than char-by-char)
+```cpp
+// ❌ Slow
+while (file.get(ch)) { /* process */ }
+
+// ✅ Fast
+char buffer[4096];
+while (file.read(buffer, sizeof(buffer)) || file.gcount() > 0) {
+    process(buffer, file.gcount());
+}
+```
+
+### 3. Use rdbuf() for file copying
+```cpp
+// Fastest way to copy
+dst << src.rdbuf();
+```
+
+### 4. Avoid frequent flush()
+```cpp
+// ❌ Slow (flushes 1000 times)
+for (int i = 0; i < 1000; i++)
+    file << i << flush;
+
+// ✅ Fast (flushes once)
+for (int i = 0; i < 1000; i++)
+    file << i << '\n';
+file.flush();
+```
+
+### 5. Use binary mode for large data
+```cpp
+// Binary is faster (no conversions)
+fstream file("big.dat", ios::binary);
+```
+
+---
+
+## Working with Different File Types
+
+### JSON (manual parsing)
+```cpp
+#include <nlohmann/json.hpp>  // Popular library
+ifstream file("data.json");
+json j = json::parse(file);
+string name = j["name"];
+```
+
+### INI/Config files
+```cpp
+map<string, string> readConfig(const string& file) {
+    ifstream in(file);
+    map<string, string> config;
+    string line;
+    while (getline(in, line)) {
+        size_t pos = line.find('=');
+        if (pos != string::npos) {
+            string key = line.substr(0, pos);
+            string val = line.substr(pos + 1);
+            config[key] = val;
+        }
+    }
+    return config;
+}
+```
+
+### Large files (chunked processing)
+```cpp
+void processLargeFile(const string& filename) {
+    ifstream file(filename, ios::binary);
+    const size_t CHUNK_SIZE = 1024 * 1024;  // 1MB
+    char* buffer = new char[CHUNK_SIZE];
+    
+    while (file.read(buffer, CHUNK_SIZE) || file.gcount() > 0) {
+        processChunk(buffer, file.gcount());
+    }
+    delete[] buffer;
+}
+```
+
+---
+
+## Advanced Techniques
+
+### 1. Memory-mapped files (C++17)
+```cpp
+#include <fstream>
+#include <sys/mman.h>  // POSIX only
+// Faster for random access, but platform-specific
+```
+
+### 2. Asynchronous I/O
+```cpp
+#include <future>
+auto future = async(launch::async, [](){ 
+    return readFile("data.txt"); 
+});
+// Do other work...
+string data = future.get();
+```
+
+### 3. File locking (prevent concurrent access)
+```cpp
+#include <fcntl.h>  // POSIX
+// Platform-specific, prevents race conditions
+```
+
+### 4. Temporary files
+```cpp
+#include <cstdio>
+char tmp[L_tmpnam];
+tmpnam(tmp);  // Generate temp filename
+ofstream tempFile(tmp);
+// ... use file ...
+remove(tmp);  // Delete when done
+```
+
+---
+
+## File System Operations (C++17)
+
+```cpp
+#include <filesystem>
+namespace fs = std::filesystem;
+
+// Check if file exists
+if (fs::exists("data.txt")) { /* ... */ }
+
+// Get file size
+uintmax_t size = fs::file_size("data.txt");
+
+// Copy/move/delete
+fs::copy("src.txt", "dst.txt");
+fs::rename("old.txt", "new.txt");
+fs::remove("file.txt");
+
+// Iterate directory
+for (auto& entry : fs::directory_iterator(".")) {
+    cout << entry.path() << endl;
+}
+
+// Create directories
+fs::create_directory("mydir");
+fs::create_directories("path/to/nested/dir");
+
+// Get file info
+auto time = fs::last_write_time("data.txt");
+auto perms = fs::status("data.txt").permissions();
+```
+
+---
+
+## Quick Reference Cheatsheet
+
+```cpp
+// OPEN
+ifstream in("r.txt");                    // Read
+ofstream out("w.txt");                   // Write (truncate)
+ofstream out("a.txt", ios::app);         // Append
+fstream f("rw.txt", ios::in|ios::out);   // Read+Write
+
+// CHECK
+if (!file) { /* error */ }
+if (file.is_open()) { /* ok */ }
+
+// READ
+char ch; file.get(ch);                   // One char
+string s; file >> s;                     // One word
+string line; getline(file, line);        // One line
+file.read(buf, n);                       // n bytes
+
+// WRITE
+file << "text" << 42 << endl;            // Formatted
+file.put('A');                           // One char
+file.write(buf, n);                      // n bytes
+
+// POSITION
+file.seekg(0, ios::beg);                 // Start
+file.seekg(0, ios::end);                 // End
+file.seekg(10, ios::cur);                // +10 from current
+streampos pos = file.tellg();            // Get position
+
+// CLOSE
+file.close();
+```
+
+---
+
+## Things to Remember
+
+1. **Always check if file opened successfully** before operations
+2. **Use binary mode** for non-text files and structs
+3. **Clear error flags** with `clear()` after errors/EOF
+4. **Use `ignore()`** after `>>` before `getline()`
+5. **Flush critical data** with `flush()` or `endl`
+6. **Check `gcount()`** after `read()` for actual bytes read
+7. **Close files explicitly** in long-running programs
+8. **Use `const string&`** for filename parameters (not `char*`)
+9. **Text mode converts newlines**, binary mode doesn't
+10. **RAII ensures cleanup** - objects auto-close when out of scope
+
+---
+
+## Security Considerations
+
+```cpp
+// 1. Validate filenames (prevent path traversal)
+if (filename.find("..") != string::npos) {
+    // Reject - potential attack
+}
+
+// 2. Limit file size when reading
+const size_t MAX_SIZE = 10 * 1024 * 1024;  // 10MB
+if (fs::file_size(filename) > MAX_SIZE) {
+    // Reject - too large
+}
+
+// 3. Use exceptions for critical errors
+try {
+    ifstream file(filename);
+    if (!file) throw runtime_error("Cannot open");
+    // ...
+} catch (const exception& e) {
+    logError(e.what());
+}
+
+// 4. Don't trust external data
+// Always validate before parsing
+```
+
+---
+
+## Conclusion
+
+File handling in C++ is powerful but requires attention to:
+- **Error checking** (always verify operations)
+- **Mode selection** (text vs binary)
+- **Resource management** (close files, RAII)
+- **Performance** (buffering, chunking)
+- **Platform differences** (newlines, paths)
+
+Master these concepts, and you'll handle any file operation confidently!
