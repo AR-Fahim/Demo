@@ -1,1375 +1,1832 @@
-# Python Lists & Tuples: Complete Guide
+# Python File Handling: Complete Guide
 
-## 1. Lists vs Tuples: Key Differences
+## 1. File Basics & Concepts
 
-| Feature | List | Tuple |
-|---------|------|-------|
-| Syntax | `[1, 2, 3]` | `(1, 2, 3)` |
-| Mutability | Mutable | Immutable |
-| Performance | Slower | Faster |
-| Memory | More | Less |
-| Methods | Many | Few (2) |
-| Use case | Dynamic data | Fixed data, dict keys |
+### **What is a File?**
+- Named location on disk storing data
+- Two types: **Text files** (human-readable) and **Binary files** (machine-readable)
+- Has path, name, extension, permissions
 
-## 2. List Creation
+### **File System Hierarchy**
+```
+Absolute path: /home/user/documents/file.txt (Linux/Mac)
+               C:\Users\user\Documents\file.txt (Windows)
+Relative path: ./file.txt (current directory)
+               ../file.txt (parent directory)
+```
+
+### **File Operations Flow**
+```
+1. Open file    → Get file object (handle)
+2. Read/Write   → Perform operations
+3. Close file   → Release resources (critical!)
+```
+
+### **Why Close Files?**
+- **Flush buffers**: Ensures data written to disk
+- **Release file locks**: Other processes can access
+- **Free system resources**: Prevents resource leak
+- **Data integrity**: Incomplete writes without close
+
+## 2. File Modes
+
+| Mode | Description | Creates | Overwrites | Position | Read | Write |
+|------|-------------|---------|------------|----------|------|-------|
+| `r` | Read (text) | No | No | Start | ✓ | ✗ |
+| `w` | Write (text) | Yes | Yes | Start | ✗ | ✓ |
+| `a` | Append (text) | Yes | No | End | ✗ | ✓ |
+| `x` | Exclusive create | Yes | Error if exists | Start | ✗ | ✓ |
+| `r+` | Read + Write | No | No | Start | ✓ | ✓ |
+| `w+` | Write + Read | Yes | Yes | Start | ✓ | ✓ |
+| `a+` | Append + Read | Yes | No | End | ✓ | ✓ |
+| `rb` | Read binary | No | No | Start | ✓ | ✗ |
+| `wb` | Write binary | Yes | Yes | Start | ✗ | ✓ |
+| `ab` | Append binary | Yes | No | End | ✗ | ✓ |
 
 ```python
-# Basic
-lst = [1, 2, 3]
-lst = list()              # Empty list
-lst = []                  # Empty list (preferred)
+# Common modes explained
+f = open('file.txt', 'r')     # Read only (default)
+f = open('file.txt', 'w')     # Write only (DANGER: erases content!)
+f = open('file.txt', 'a')     # Append only (safe)
+f = open('file.txt', 'r+')    # Read and write (doesn't erase)
+f = open('file.txt', 'w+')    # Write and read (ERASES content!)
 
-# From iterable
-lst = list("abc")         # ['a', 'b', 'c']
-lst = list(range(5))      # [0, 1, 2, 3, 4]
-lst = list((1, 2, 3))     # From tuple
+# Binary mode
+f = open('image.png', 'rb')   # Read binary
+f = open('image.png', 'wb')   # Write binary
 
-# List comprehension
-lst = [x*2 for x in range(5)]           # [0, 2, 4, 6, 8]
-lst = [x for x in range(10) if x % 2]  # [1, 3, 5, 7, 9]
-lst = [x if x > 0 else 0 for x in [-1, 2, -3]]  # [0, 2, 0]
-
-# Nested comprehension
-matrix = [[i+j for j in range(3)] for i in range(3)]
-# [[0,1,2], [1,2,3], [2,3,4]]
-
-# Mixed types (allowed but avoid)
-lst = [1, "two", 3.0, [4, 5]]
-
-# Pre-allocated list
-lst = [0] * 5             # [0, 0, 0, 0, 0]
-lst = [None] * 3          # [None, None, None]
+# Exclusive mode (fails if exists)
+f = open('file.txt', 'x')     # FileExistsError if file exists
 ```
 
-## 3. Tuple Creation
+## 3. Opening Files
+
+### **Basic Syntax**
+```python
+# Manual open/close
+f = open('file.txt', 'r')
+content = f.read()
+f.close()                     # Must close!
+
+# With context manager (BEST PRACTICE)
+with open('file.txt', 'r') as f:
+    content = f.read()
+# Auto-closes, even if exception occurs
+```
+
+### **Why Context Manager?**
+```python
+# Manual close (RISKY)
+f = open('file.txt', 'r')
+data = f.read()
+result = process(data)        # If this raises exception...
+f.close()                     # ...this never runs!
+
+# Context manager (SAFE)
+with open('file.txt', 'r') as f:
+    data = f.read()
+    result = process(data)    # Even if exception, file closes
+```
+
+### **Encoding**
+```python
+# Text files default encoding
+# Linux/Mac: UTF-8
+# Windows: cp1252 (locale-dependent)
+
+# Explicit encoding (RECOMMENDED)
+with open('file.txt', 'r', encoding='utf-8') as f:
+    content = f.read()
+
+# Common encodings
+# utf-8: Universal, supports all languages
+# ascii: English only (7-bit)
+# latin-1: Western European
+# cp1252: Windows default
+# utf-16: Wide characters
+
+# Handle encoding errors
+with open('file.txt', 'r', encoding='utf-8', errors='ignore') as f:
+    content = f.read()        # Skip invalid characters
+
+# errors parameter:
+# 'strict': Raise exception (default)
+# 'ignore': Skip invalid chars
+# 'replace': Replace with �
+# 'backslashreplace': Replace with \xNN
+```
+
+## 4. Reading Files
+
+### **read() - Read Entire File**
+```python
+with open('file.txt', 'r') as f:
+    content = f.read()        # Returns entire file as string
+
+# Read n bytes
+with open('file.txt', 'r') as f:
+    chunk = f.read(10)        # Read first 10 characters
+
+# Read all
+with open('file.txt', 'r') as f:
+    all_content = f.read()    # Empty string if at EOF
+    more_content = f.read()   # Returns '' (empty)
+```
+
+### **readline() - Read One Line**
+```python
+with open('file.txt', 'r') as f:
+    line1 = f.readline()      # Includes \n at end
+    line2 = f.readline()      # Next line
+    line3 = f.readline()      # Returns '' at EOF
+
+# Remove newline
+line = f.readline().strip()   # Remove leading/trailing whitespace
+line = f.readline().rstrip()  # Remove trailing only
+```
+
+### **readlines() - Read All Lines**
+```python
+with open('file.txt', 'r') as f:
+    lines = f.readlines()     # Returns list of strings
+
+# Example: ['line1\n', 'line2\n', 'line3']
+
+# Memory concern: Loads entire file into memory
+# For large files, use iteration instead
+```
+
+### **Iteration (BEST for Large Files)**
+```python
+# Most efficient way
+with open('file.txt', 'r') as f:
+    for line in f:            # Reads one line at a time
+        print(line.strip())   # Memory efficient!
+
+# Why iteration is best:
+# - Memory efficient (doesn't load all at once)
+# - Pythonic and readable
+# - Fast for large files
+```
+
+### **Read Comparison**
 
 ```python
-# Basic
-tup = (1, 2, 3)
-tup = tuple()             # Empty tuple
-tup = ()                  # Empty tuple (preferred)
+# Small files (<10MB)
+with open('small.txt', 'r') as f:
+    content = f.read()        # OK, load all
 
-# Single element (comma required!)
-tup = (1,)                # Tuple with one element
-not_tuple = (1)           # This is int, not tuple!
+# Large files (>10MB)
+with open('large.txt', 'r') as f:
+    for line in f:            # GOOD, process line by line
+        process(line)
 
-# Without parentheses (tuple packing)
-tup = 1, 2, 3             # (1, 2, 3)
-a, b, c = tup             # Tuple unpacking
-
-# From iterable
-tup = tuple([1, 2, 3])    # From list
-tup = tuple("abc")        # ('a', 'b', 'c')
-
-# Generator expression (creates tuple)
-tup = tuple(x*2 for x in range(5))  # (0, 2, 4, 6, 8)
+# Read in chunks (for binary or huge files)
+with open('huge.bin', 'rb') as f:
+    while True:
+        chunk = f.read(8192)  # Read 8KB at a time
+        if not chunk:
+            break
+        process(chunk)
 ```
 
-## 4. Indexing & Slicing (Both List & Tuple)
+## 5. Writing Files
+
+### **write() - Write String**
+```python
+with open('file.txt', 'w') as f:
+    f.write('Hello, World!')   # Returns bytes written
+    f.write('\n')              # Must add newline manually
+
+# write() doesn't add newline!
+with open('file.txt', 'w') as f:
+    f.write('Line 1')
+    f.write('Line 2')          # Result: "Line 1Line 2"
+
+# Add newlines
+with open('file.txt', 'w') as f:
+    f.write('Line 1\n')
+    f.write('Line 2\n')        # Result: "Line 1\nLine 2\n"
+```
+
+### **writelines() - Write List**
+```python
+lines = ['Line 1\n', 'Line 2\n', 'Line 3\n']
+
+with open('file.txt', 'w') as f:
+    f.writelines(lines)        # Writes all lines
+
+# writelines() doesn't add newlines!
+lines = ['Line 1', 'Line 2']
+with open('file.txt', 'w') as f:
+    f.writelines(lines)        # Result: "Line 1Line 2"
+
+# Add newlines manually
+with open('file.txt', 'w') as f:
+    f.writelines(line + '\n' for line in lines)
+```
+
+### **Append vs Write**
+```python
+# Write mode (w) - ERASES existing content
+with open('file.txt', 'w') as f:
+    f.write('New content')     # Deletes old content!
+
+# Append mode (a) - Adds to end
+with open('file.txt', 'a') as f:
+    f.write('New line\n')      # Keeps old content
+
+# Example
+# file.txt contains: "Hello"
+
+with open('file.txt', 'w') as f:
+    f.write('World')
+# Result: "World" (Hello is gone!)
+
+with open('file.txt', 'a') as f:
+    f.write('World')
+# Result: "HelloWorld" (appended)
+```
+
+## 6. File Position & Seeking
+
+### **tell() - Get Current Position**
+```python
+with open('file.txt', 'r') as f:
+    print(f.tell())            # 0 (start)
+    f.read(5)
+    print(f.tell())            # 5 (read 5 bytes)
+    f.read()
+    print(f.tell())            # EOF position
+```
+
+### **seek() - Move Position**
+```python
+# seek(offset, whence)
+# whence: 0 (start), 1 (current), 2 (end)
+
+with open('file.txt', 'r') as f:
+    f.seek(0)                  # Go to start
+    f.seek(5)                  # Go to byte 5
+    f.seek(0, 2)               # Go to end
+    f.seek(-5, 2)              # 5 bytes before end
+
+# Text mode only supports:
+# - seek(0) or seek(offset, 0)
+# - seek(0, 2) for end
+
+# Binary mode supports all:
+with open('file.bin', 'rb') as f:
+    f.seek(10, 1)              # Move 10 bytes forward
+    f.seek(-5, 1)              # Move 5 bytes back
+```
+
+### **Rewind File**
+```python
+with open('file.txt', 'r') as f:
+    content = f.read()
+    # Now at EOF
+    f.seek(0)                  # Back to start
+    content_again = f.read()   # Read again
+```
+
+## 7. File Object Methods
 
 ```python
-lst = [0, 1, 2, 3, 4, 5]
+# Reading
+f.read(size=-1)              # Read n bytes (all if -1)
+f.readline(size=-1)          # Read one line
+f.readlines()                # Read all lines as list
 
-# Indexing
-lst[0]                    # 0 (first)
-lst[-1]                   # 5 (last)
-lst[-2]                   # 4 (second last)
-# lst[100]                # IndexError
+# Writing
+f.write(string)              # Write string (returns bytes written)
+f.writelines(list)           # Write list of strings
 
-# Slicing [start:stop:step]
-lst[1:4]                  # [1, 2, 3]
-lst[:3]                   # [0, 1, 2] (first 3)
-lst[3:]                   # [3, 4, 5] (from index 3)
-lst[::2]                  # [0, 2, 4] (every 2nd)
-lst[::-1]                 # [5, 4, 3, 2, 1, 0] (reverse)
-lst[1::2]                 # [1, 3, 5] (odd indices)
-lst[-3:]                  # [3, 4, 5] (last 3)
-lst[:-2]                  # [0, 1, 2, 3] (all except last 2)
+# Position
+f.tell()                     # Current position
+f.seek(offset, whence=0)     # Move to position
 
-# Edge cases
-lst[100:]                 # [] (no error)
-lst[5:2]                  # [] (invalid range)
-lst[:100]                 # [0, 1, 2, 3, 4, 5] (clips to end)
+# Buffer
+f.flush()                    # Force write buffer to disk
 
-# Negative step
-lst[4:1:-1]               # [4, 3, 2] (reverse slice)
-lst[::-1]                 # [5, 4, 3, 2, 1, 0] (full reverse)
+# State
+f.closed                     # True if closed
+f.mode                       # File mode ('r', 'w', etc.)
+f.name                       # File name
+f.encoding                   # File encoding (text mode)
+
+# Close
+f.close()                    # Close file
+
+# Readable/Writable
+f.readable()                 # Can read?
+f.writable()                 # Can write?
+f.seekable()                 # Can seek?
+
+# Truncate
+f.truncate(size=None)        # Resize file
+
+# File descriptor
+f.fileno()                   # OS file descriptor (int)
+
+# Check if terminal
+f.isatty()                   # Is terminal device?
 ```
 
-## 5. List Methods (11 Total)
+## 8. Binary Files
 
-### **Adding Elements**
-
+### **Reading Binary**
 ```python
-lst = [1, 2, 3]
+# Read image
+with open('image.png', 'rb') as f:
+    data = f.read()            # Returns bytes object
 
-# append() - add single element at end
-lst.append(4)             # [1, 2, 3, 4]
-lst.append([5, 6])        # [1, 2, 3, 4, [5, 6]] (nested)
+# Read in chunks (large files)
+with open('large.bin', 'rb') as f:
+    while True:
+        chunk = f.read(8192)   # 8KB chunks
+        if not chunk:
+            break
+        process(chunk)
 
-# extend() - add multiple elements
-lst = [1, 2, 3]
-lst.extend([4, 5])        # [1, 2, 3, 4, 5]
-lst.extend("ab")          # [1, 2, 3, 4, 5, 'a', 'b']
-# lst += [4, 5]           # Same as extend
-
-# insert() - add at specific position
-lst = [1, 2, 3]
-lst.insert(1, 'x')        # [1, 'x', 2, 3]
-lst.insert(0, 'y')        # ['y', 1, 'x', 2, 3] (beginning)
-lst.insert(100, 'z')      # Adds at end (no error)
+# Byte operations
+with open('file.bin', 'rb') as f:
+    data = f.read(10)          # First 10 bytes
+    print(data)                # b'\x89PNG\r\n\x1a\n...'
+    print(data[0])             # 137 (first byte as int)
+    print(hex(data[0]))        # 0x89
 ```
 
-### **Removing Elements**
-
+### **Writing Binary**
 ```python
-lst = [1, 2, 3, 2, 4]
+# Write bytes
+data = b'\x00\x01\x02\x03'
+with open('file.bin', 'wb') as f:
+    f.write(data)
 
-# remove() - remove first occurrence by value
-lst.remove(2)             # [1, 3, 2, 4]
-# lst.remove(99)          # ValueError: not in list
+# Copy binary file
+with open('source.png', 'rb') as src:
+    with open('dest.png', 'wb') as dst:
+        dst.write(src.read())
 
-# pop() - remove and return by index
-lst = [1, 2, 3]
-x = lst.pop()             # x=3, lst=[1, 2] (last)
-x = lst.pop(0)            # x=1, lst=[2] (first)
-# lst.pop()               # IndexError if empty
+# Or copy in chunks (better for large files)
+with open('source.png', 'rb') as src:
+    with open('dest.png', 'wb') as dst:
+        while True:
+            chunk = src.read(8192)
+            if not chunk:
+                break
+            dst.write(chunk)
 
-# clear() - remove all
-lst = [1, 2, 3]
-lst.clear()               # []
-
-# del statement (not a method)
-lst = [1, 2, 3, 4, 5]
-del lst[0]                # [2, 3, 4, 5]
-del lst[1:3]              # [2, 5]
-del lst[:]                # [] (clear)
+# Using shutil (best for copying)
+import shutil
+shutil.copy('source.png', 'dest.png')
 ```
 
-### **Searching & Counting**
-
+### **Binary vs Text**
 ```python
-lst = [1, 2, 3, 2, 4]
+# Text mode
+with open('file.txt', 'r') as f:
+    data = f.read()            # Returns str
+    type(data)                 # <class 'str'>
 
-# index() - find first occurrence
-lst.index(2)              # 1
-lst.index(2, 2)           # 3 (start from index 2)
-# lst.index(99)           # ValueError
+# Binary mode
+with open('file.txt', 'rb') as f:
+    data = f.read()            # Returns bytes
+    type(data)                 # <class 'bytes'>
 
-# count() - count occurrences
-lst.count(2)              # 2
-lst.count(99)             # 0 (no error)
-
-# Membership (not a method)
-2 in lst                  # True
-99 not in lst             # True
+# Convert
+text = "Hello"
+binary = text.encode('utf-8')  # str → bytes
+text_again = binary.decode('utf-8')  # bytes → str
 ```
 
-### **Sorting & Reversing**
+## 9. File Buffering
 
+### **What is Buffering?**
+```
+Program → Buffer (in memory) → Disk
+                ↑
+           Flush when full or close
+
+Why buffer?
+- Disk I/O is slow (microseconds vs nanoseconds)
+- Batching writes is more efficient
+- Reduces system calls
+```
+
+### **Buffer Modes**
 ```python
-lst = [3, 1, 4, 1, 5]
+# Default buffering (good for most cases)
+f = open('file.txt', 'w')
 
-# sort() - in-place sorting
-lst.sort()                # [1, 1, 3, 4, 5]
-lst.sort(reverse=True)    # [5, 4, 3, 1, 1]
+# No buffering (writes immediately)
+f = open('file.txt', 'w', buffering=0)  # Binary mode only
 
-# Sort by key
-words = ["apple", "pie", "a", "cherry"]
-words.sort(key=len)       # ['a', 'pie', 'apple', 'cherry']
-words.sort(key=str.lower) # Case-insensitive
+# Line buffering (flush on newline)
+f = open('file.txt', 'w', buffering=1)  # Text mode only
 
-# Custom key
-data = [(1, 'b'), (2, 'a'), (3, 'c')]
-data.sort(key=lambda x: x[1])  # [(2,'a'), (1,'b'), (3,'c')]
+# Custom buffer size (bytes)
+f = open('file.txt', 'w', buffering=8192)  # 8KB buffer
 
-# sorted() - returns new list (not a method)
-lst = [3, 1, 4]
-new_lst = sorted(lst)     # [1, 3, 4] (lst unchanged)
+# Examples
+with open('file.txt', 'w', buffering=1) as f:
+    f.write('Line 1\n')        # Flushed immediately (line buffered)
+    f.write('No newline')      # Stays in buffer
+    f.flush()                  # Force flush
 
-# reverse() - in-place reverse
-lst = [1, 2, 3]
-lst.reverse()             # [3, 2, 1]
-
-# reversed() - returns iterator (not a method)
-lst = [1, 2, 3]
-list(reversed(lst))       # [3, 2, 1] (lst unchanged)
+# When to flush manually
+with open('log.txt', 'a') as f:
+    f.write('Important log entry\n')
+    f.flush()                  # Ensure written to disk NOW
 ```
 
-### **Copying**
-
+### **Buffer Use Cases**
 ```python
-# copy() - shallow copy
-lst = [1, 2, 3]
-new_lst = lst.copy()      # New list
-new_lst = lst[:]          # Same effect
-new_lst = list(lst)       # Same effect
+# High-frequency writes (use default buffer)
+with open('output.txt', 'w') as f:
+    for i in range(10000):
+        f.write(f'{i}\n')      # Buffered, efficient
 
-# Shallow copy gotcha
-lst = [[1, 2], [3, 4]]
-new_lst = lst.copy()
-new_lst[0][0] = 99        # lst = [[99, 2], [3, 4]] (affected!)
+# Critical logs (flush immediately)
+with open('critical.log', 'a', buffering=1) as f:
+    f.write(f'{timestamp}: Error\n')  # Flushed on \n
 
-# Deep copy (for nested)
-import copy
-lst = [[1, 2], [3, 4]]
-new_lst = copy.deepcopy(lst)
-new_lst[0][0] = 99        # lst unchanged
+# Real-time monitoring (no buffer)
+with open('monitor.log', 'wb', buffering=0) as f:
+    while True:
+        data = get_sensor_data()
+        f.write(data)          # Written immediately
 ```
 
-## 6. Tuple Methods (2 Only)
+## 10. Exception Handling
 
+### **Common File Exceptions**
 ```python
-tup = (1, 2, 3, 2, 4)
+# FileNotFoundError - File doesn't exist
+try:
+    f = open('nonexistent.txt', 'r')
+except FileNotFoundError:
+    print("File not found!")
 
-# count() - count occurrences
-tup.count(2)              # 2
+# PermissionError - No permission to access
+try:
+    f = open('/root/file.txt', 'w')
+except PermissionError:
+    print("No permission!")
 
-# index() - find first occurrence
-tup.index(3)              # 2
-tup.index(2, 2)           # 3 (start from index 2)
-# tup.index(99)           # ValueError
+# IsADirectoryError - Path is directory
+try:
+    f = open('/home/user', 'r')
+except IsADirectoryError:
+    print("That's a directory!")
+
+# FileExistsError - File exists (with 'x' mode)
+try:
+    f = open('existing.txt', 'x')
+except FileExistsError:
+    print("File already exists!")
+
+# UnicodeDecodeError - Encoding mismatch
+try:
+    with open('file.txt', 'r', encoding='ascii') as f:
+        content = f.read()
+except UnicodeDecodeError:
+    print("Encoding error!")
+
+# IOError / OSError - Generic I/O errors
+try:
+    f = open('file.txt', 'r')
+    content = f.read()
+except OSError as e:
+    print(f"I/O error: {e}")
 ```
 
-## 7. List Operators
-
+### **Safe File Operations**
 ```python
-# Concatenation
-[1, 2] + [3, 4]           # [1, 2, 3, 4]
-(1, 2) + (3, 4)           # (1, 2, 3, 4)
-
-# Repetition
-[1, 2] * 3                # [1, 2, 1, 2, 1, 2]
-(1,) * 3                  # (1, 1, 1)
-
-# Comparison (lexicographic)
-[1, 2] < [1, 3]           # True
-[1, 2] == [1, 2]          # True
-[1, 2, 3] > [1, 2]        # True (longer wins if equal)
-
-# Membership
-1 in [1, 2, 3]            # True
-[1, 2] in [[1, 2], [3]]   # True (sublist)
-
-# Identity
-a = [1, 2]
-b = [1, 2]
-a == b                    # True (same content)
-a is b                    # False (different objects)
-
-# Length
-len([1, 2, 3])            # 3
-len(())                   # 0
-```
-
-## 8. List Modification (Mutability)
-
-```python
-lst = [1, 2, 3, 4, 5]
-
-# Item assignment
-lst[0] = 99               # [99, 2, 3, 4, 5]
-lst[-1] = 88              # [99, 2, 3, 4, 88]
-
-# Slice assignment
-lst[1:3] = [7, 8, 9]      # [99, 7, 8, 9, 4, 88]
-lst[::2] = [0, 0, 0]      # [0, 7, 0, 9, 0, 88]
-
-# Insert via slice
-lst = [1, 2, 3]
-lst[1:1] = [99]           # [1, 99, 2, 3]
-
-# Delete via slice
-lst = [1, 2, 3, 4, 5]
-lst[1:3] = []             # [1, 4, 5]
-
-# Tuples are immutable
-tup = (1, 2, 3)
-# tup[0] = 99             # TypeError
-# tup.append(4)           # AttributeError
-```
-
-## 9. Unpacking & Packing
-
-```python
-# Basic unpacking
-a, b, c = [1, 2, 3]       # a=1, b=2, c=3
-a, b, c = (1, 2, 3)       # Works with tuples too
-
-# Star unpacking (Python 3.5+)
-a, *b, c = [1, 2, 3, 4, 5]  # a=1, b=[2,3,4], c=5
-a, *b = [1, 2, 3]             # a=1, b=[2,3]
-*a, b = [1, 2, 3]             # a=[1,2], b=3
-
-# Ignore values
-a, _, c = [1, 2, 3]       # _ conventionally means "ignore"
-a, *_ = [1, 2, 3, 4]      # a=1, ignore rest
-
-# Swap values
-a, b = 1, 2
-a, b = b, a               # a=2, b=1 (no temp variable!)
-
-# Multiple assignment
-a = b = c = []            # DANGER: all point to same list!
-a, b, c = [], [], []      # Correct: separate lists
-
-# Extended unpacking in function
-def func(a, b, *args, **kwargs):
-    pass
-func(1, 2, 3, 4, x=5)     # args=(3,4), kwargs={'x':5}
-```
-
-## 10. Nested Lists & Tuples
-
-```python
-# 2D list (matrix)
-matrix = [
-    [1, 2, 3],
-    [4, 5, 6],
-    [7, 8, 9]
-]
-matrix[0][1]              # 2
-matrix[1]                 # [4, 5, 6]
-
-# Flattening
-nested = [[1, 2], [3, 4], [5]]
-flat = [item for sublist in nested for item in sublist]
-# [1, 2, 3, 4, 5]
-
-# Deep nesting
-data = [1, [2, [3, [4, [5]]]]]
-data[1][1][1][1][0]       # 5
-
-# Create 2D list (WRONG)
-matrix = [[0] * 3] * 3    # All rows reference same list!
-matrix[0][0] = 1          # All rows change!
-
-# Create 2D list (CORRECT)
-matrix = [[0] * 3 for _ in range(3)]
-matrix[0][0] = 1          # Only first row changes
-```
-
-## 11. List Comprehensions (Advanced)
-
-```python
-# Basic
-[x*2 for x in range(5)]                    # [0,2,4,6,8]
-
-# With condition
-[x for x in range(10) if x % 2]            # [1,3,5,7,9]
-
-# If-else
-[x if x > 0 else 0 for x in [-1, 2, -3]]   # [0,2,0]
-
-# Nested loops
-[(i,j) for i in range(3) for j in range(2)]
-# [(0,0),(0,1),(1,0),(1,1),(2,0),(2,1)]
-
-# Filter with condition
-[x for x in range(10) if x % 2 if x > 5]   # [7, 9]
-
-# Flatten 2D list
-matrix = [[1,2], [3,4]]
-[item for row in matrix for item in row]   # [1,2,3,4]
-
-# Dictionary from list
-{x: x**2 for x in range(5)}                # {0:0,1:1,2:4,3:9,4:16}
-
-# Set from list
-{x % 3 for x in range(10)}                 # {0, 1, 2}
-
-# Generator (not list comprehension)
-gen = (x*2 for x in range(5))              # Generator object
-list(gen)                                  # [0,2,4,6,8]
-```
-
-## 12. Common Patterns & Idioms
-
-### **Check Empty**
-```python
-lst = []
-if not lst:               # Pythonic
-    print("empty")
-
-if len(lst) == 0:         # Works but verbose
-    print("empty")
-```
-
-### **Reverse**
-```python
-lst = [1, 2, 3]
-lst[::-1]                 # [3, 2, 1] (new list)
-reversed(lst)             # Iterator
-list(reversed(lst))       # [3, 2, 1] (new list)
-lst.reverse()             # In-place
-```
-
-### **Find Max/Min**
-```python
-lst = [3, 1, 4, 1, 5]
-max(lst)                  # 5
-min(lst)                  # 1
-max(lst, default=0)       # 0 if empty (Python 3.4+)
-
-# With key
-words = ["apple", "pie", "a"]
-max(words, key=len)       # "apple"
-```
-
-### **Sum, Any, All**
-```python
-sum([1, 2, 3])            # 6
-sum([1, 2, 3], 10)        # 16 (start value)
-
-any([False, True, False]) # True (at least one True)
-all([True, True, True])   # True (all True)
-
-any([])                   # False
-all([])                   # True (vacuous truth)
-```
-
-### **Enumerate**
-```python
-lst = ['a', 'b', 'c']
-for i, val in enumerate(lst):
-    print(i, val)         # 0 a, 1 b, 2 c
-
-for i, val in enumerate(lst, 1):  # Start from 1
-    print(i, val)         # 1 a, 2 b, 3 c
-
-list(enumerate(lst))      # [(0,'a'), (1,'b'), (2,'c')]
-```
-
-### **Zip**
-```python
-a = [1, 2, 3]
-b = ['a', 'b', 'c']
-list(zip(a, b))           # [(1,'a'), (2,'b'), (3,'c')]
-
-# Unequal lengths (stops at shortest)
-a = [1, 2, 3, 4]
-b = ['a', 'b']
-list(zip(a, b))           # [(1,'a'), (2,'b')]
-
-# Unzip
-pairs = [(1,'a'), (2,'b'), (3,'c')]
-nums, letters = zip(*pairs)  # nums=(1,2,3), letters=('a','b','c')
-
-# zip_longest (from itertools)
-from itertools import zip_longest
-a = [1, 2, 3, 4]
-b = ['a', 'b']
-list(zip_longest(a, b, fillvalue='-'))  # [(1,'a'),(2,'b'),(3,'-'),(4,'-')]
-```
-
-### **Filter, Map, Reduce**
-```python
-# Filter (prefer list comprehension)
-list(filter(lambda x: x > 0, [-1, 2, -3, 4]))  # [2, 4]
-[x for x in [-1, 2, -3, 4] if x > 0]           # [2, 4] (better)
-
-# Map (prefer list comprehension)
-list(map(lambda x: x*2, [1, 2, 3]))            # [2, 4, 6]
-[x*2 for x in [1, 2, 3]]                       # [2, 4, 6] (better)
-
-# Reduce
-from functools import reduce
-reduce(lambda x, y: x+y, [1, 2, 3, 4])         # 10
-sum([1, 2, 3, 4])                              # 10 (better)
-```
-
-### **Remove Duplicates**
-```python
-lst = [1, 2, 2, 3, 3, 3]
-
-# Using set (order lost)
-list(set(lst))            # [1, 2, 3]
-
-# Preserve order (dict.fromkeys)
-list(dict.fromkeys(lst))  # [1, 2, 3]
-
-# Preserve order (manual)
-seen = set()
-result = [x for x in lst if not (x in seen or seen.add(x))]
-```
-
-### **List Rotation**
-```python
-lst = [1, 2, 3, 4, 5]
-
-# Rotate right by 2
-n = 2
-lst[-n:] + lst[:-n]       # [4, 5, 1, 2, 3]
-
-# Rotate left by 2
-lst[n:] + lst[:n]         # [3, 4, 5, 1, 2]
-
-# Using collections.deque (efficient)
-from collections import deque
-d = deque([1, 2, 3, 4, 5])
-d.rotate(2)               # deque([4, 5, 1, 2, 3])
-```
-
-## 13. Performance & Memory
-
-### **Time Complexity**
-
-| Operation | List | Tuple |
-|-----------|------|-------|
-| Access `lst[i]` | O(1) | O(1) |
-| Search `x in lst` | O(n) | O(n) |
-| Append | O(1) amortized | N/A |
-| Pop last | O(1) | N/A |
-| Pop first | O(n) | N/A |
-| Insert | O(n) | N/A |
-| Delete | O(n) | N/A |
-| Copy | O(n) | O(n) |
-| Sort | O(n log n) | N/A |
-
-### **Memory Usage**
-```python
-import sys
-
-sys.getsizeof([])         # 56 bytes (empty list)
-sys.getsizeof([1,2,3])    # 88 bytes
-sys.getsizeof(())         # 40 bytes (empty tuple)
-sys.getsizeof((1,2,3))    # 64 bytes
-
-# Lists over-allocate for growth
-lst = []
-for i in range(10):
-    lst.append(i)
-    print(sys.getsizeof(lst))  # Grows in chunks
-
-# Tuples use exact size
-```
-
-### **When to Use What**
-
-**Use Lists when:**
-- Data changes (add/remove/modify)
-- Need sorting/reversing
-- Building collections dynamically
-- Order matters and changes
-
-**Use Tuples when:**
-- Data is fixed/constant
-- Need hashable type (dict keys, set members)
-- Returning multiple values from function
-- Performance critical (faster)
-- Want to prevent accidental modification
-
-## 14. Edge Cases & Gotchas
-
-```python
-# Reference vs copy
-a = [1, 2, 3]
-b = a                     # b points to same list!
-b.append(4)               # a is also [1, 2, 3, 4]
-
-# Correct copy
-b = a.copy()              # or a[:] or list(a)
-
-# Mutable default argument (DANGER!)
-def add_to_list(item, lst=[]):  # BAD!
-    lst.append(item)
-    return lst
-
-add_to_list(1)            # [1]
-add_to_list(2)            # [1, 2] (reuses same list!)
-
-# Correct way
-def add_to_list(item, lst=None):
-    if lst is None:
-        lst = []
-    lst.append(item)
-    return lst
-
-# List multiplication reference
-lst = [[]] * 3            # [[],[],[]] (same object!)
-lst[0].append(1)          # [[1],[1],[1]] (all change!)
-
-# Correct
-lst = [[] for _ in range(3)]
-
-# Tuple immutability doesn't mean content is immutable
-tup = ([1, 2], [3, 4])
-# tup[0] = [5, 6]         # TypeError
-tup[0].append(5)          # Works! ([1,2,5], [3,4])
-
-# Comparison with None
-lst = [1, 2, None, 4]
-None in lst               # True
-lst == None               # False (correct)
-lst is None               # False (correct)
-
-# Sorting mixed types (Python 3)
-# [1, 'a', 3].sort()      # TypeError in Python 3
-# Python 2 allowed this (numbers < strings)
-
-# Index on empty list
-lst = []
-# lst[0]                  # IndexError
-# lst.pop()               # IndexError
-# lst.remove(1)           # ValueError
-
-# Negative indexing wrap
-lst = [1, 2, 3]
-lst[-10]                  # IndexError (even though negative)
-
-# Slice assignment length mismatch (OK)
-lst = [1, 2, 3, 4, 5]
-lst[1:3] = [99]           # [1, 99, 4, 5] (length changes)
-
-# Extended slice assignment must match
-lst = [1, 2, 3, 4, 5]
-# lst[::2] = [99]         # ValueError: length mismatch
-lst[::2] = [0, 0, 0]      # OK: [0, 2, 0, 4, 0]
-```
-
-## 15. List vs Array vs Deque
-
-```python
-# List (flexible, general purpose)
-lst = [1, 2, 3, 4]
-
-# Array (typed, memory efficient)
-import array
-arr = array.array('i', [1, 2, 3, 4])  # 'i' = signed int
-# Faster for numeric data, less memory
-
-# Deque (double-ended queue)
-from collections import deque
-dq = deque([1, 2, 3, 4])
-dq.appendleft(0)          # O(1) - fast!
-dq.popleft()              # O(1) - fast!
-# Use for queues/stacks, not random access
-
-# NumPy array (scientific computing)
-import numpy as np
-arr = np.array([1, 2, 3, 4])
-# Vectorized operations, mathematical functions
-```
-
-## 16. Named Tuples
-
-```python
-from collections import namedtuple
-
-# Define
-Point = namedtuple('Point', ['x', 'y'])
-p = Point(1, 2)
-
-# Access
-p.x                       # 1
-p[0]                      # 1 (still works)
-
-# Immutable
-# p.x = 3                 # AttributeError
-
-# Convert to dict
-p._asdict()               # {'x': 1, 'y': 2}
-
-# Replace (returns new)
-p2 = p._replace(x=3)      # Point(x=3, y=2)
-
-# Useful for returning multiple values
-def get_coordinates():
-    return Point(10, 20)
-
-# Better than regular tuple
-def get_coords():
-    return (10, 20)       # What is 0 and 1?
-```
-
-## 17. Advanced Techniques
-
-### **List as Stack (LIFO)**
-```python
-stack = []
-stack.append(1)           # Push
-stack.append(2)
-stack.pop()               # 2 (Pop)
-```
-
-### **List as Queue (FIFO) - DON'T**
-```python
-queue = []
-queue.append(1)           # Enqueue
-queue.pop(0)              # Dequeue (O(n) - SLOW!)
-
-# Use deque instead
-from collections import deque
-queue = deque()
-queue.append(1)           # Enqueue
-queue.popleft()           # Dequeue (O(1) - FAST!)
-```
-
-### **Priority Queue**
-```python
-import heapq
-
-heap = []
-heapq.heappush(heap, 3)
-heapq.heappush(heap, 1)
-heapq.heappush(heap, 2)
-heapq.heappop(heap)       # 1 (smallest)
-```
-
-### **Binary Search**
-```python
-import bisect
-
-lst = [1, 3, 5, 7, 9]
-bisect.bisect_left(lst, 5)   # 2 (index)
-bisect.bisect_right(lst, 5)  # 3
-bisect.insort(lst, 4)        # [1,3,4,5,7,9] (maintains sort)
-```
-
-### **Chain Multiple Lists**
-```python
-from itertools import chain
-
-a = [1, 2]
-b = [3, 4]
-c = [5, 6]
-list(chain(a, b, c))      # [1, 2, 3, 4, 5, 6]
-
-# vs concatenation
-a + b + c                 # [1, 2, 3, 4, 5, 6]
-# chain is lazy (memory efficient)
-```
-
-## 18. Complete Method Reference
-
-### **List Methods (11)**
-```
-append(x)       - Add x to end
-extend(iterable)- Add all items from iterable
-insert(i, x)    - Insert x at position i
-remove(x)       - Remove first occurrence of x
-pop([i])        - Remove and return item at i (default: -1)
-clear()         - Remove all items
-index(x[,s,e])  - Return index of x (start, end)
-count(x)        - Count occurrences of x
-sort()          - Sort in place
-reverse()       - Reverse in place
-copy()          - Return shallow copy
-```
-
-### **Tuple Methods (2)**
-```
-count(x)        - Count occurrences of x
-index(x[,s,e])  - Return index of x (start, end)
-```
-
-### **Built-in Functions (work on both)**
-```
-len()           - Length
-max()           - Maximum value
-min()           - Minimum value
-sum()           - Sum (numeric only)
-sorted()        - Return sorted list
-reversed()      - Return reverse iterator
-any()           - True if any element is True
-all()           - True if all elements are True
-enumerate()     - Return (index, value) pairs
-zip()           - Combine multiple iterables
-```
-
-## 19. Performance Tips
-
-1. **Use list comprehension** over `map()`/`filter()`
-2. **Use `extend()`** instead of repeated `append()`
-3. **Pre-allocate** if size known: `[None] * n`
-4. **Avoid `insert(0, x)`** - use `deque.appendleft()`
-5. **Avoid `pop(0)`** - use `deque.popleft()`
-6. **Use tuples** for immutable data (faster, less memory)
-7. **Use `in` for membership** instead of `index()` + try/except
-8. **Sort once** then use `bisect` for insertions
-9. **Use `any()`/`all()`** instead of comprehension + `True in`
-10. **Use generators** for large datasets to save memory
-
-## 20. Quick Reference Table
-
-| Task | List | Tuple |
-|------|------|-------|
-| Create | `[1,2,3]` | `(1,2,3)` or `1,2,3` |
-| Empty | `[]` | `()` |
-| Single | `[1]` | `(1,)` (comma!) |
-| Access | `lst[0]` | `tup[0]` |
-| Slice | `lst[1:3]` | `tup[1:3]` |
-| Length | `len(lst)` | `len(tup)` |
-| Add | `.append(x)` | N/A |
-| Remove | `.remove(x)` | N/A |
-| Sort | `.sort()` | `sorted(tup)` |
-| Reverse | `.reverse()` | `tup[::-1]` |
-| Copy | `.copy()` | `tuple(tup)` |
-| Count | `.count(x)` | `.count(x)` |
-| Find | `.index(x)` | `.index(x)` |
-| Concat | `+` | `+` |
-| Repeat | `*` | `*` |
-| Check | `x in lst` | `x in tup` |
-
-## 21. Memory & Internals
-
-### **List Growth Strategy**
-```python
-# Lists over-allocate to minimize reallocation
-import sys
-
-lst = []
-for i in range(20):
-    print(f"len={len(lst)}, size={sys.getsizeof(lst)}")
-    lst.append(i)
-
-# Output shows size grows in jumps:
-# 0 items: 56 bytes
-# 1-4 items: 88 bytes
-# 5-8 items: 120 bytes
-# etc. (growth pattern: 0, 4, 8, 16, 25, 35, 46, 58, 72, 88...)
-```
-
-### **Reference Counting**
-```python
-import sys
-
-lst = [1, 2, 3]
-sys.getrefcount(lst)      # 2 (one from lst, one from getrefcount)
-
-a = lst                   # Share reference
-sys.getrefcount(lst)      # 3
-
-del a                     # Remove reference
-sys.getrefcount(lst)      # 2
-```
-
-### **Tuple Immutability Benefits**
-```python
-# Tuples can be dict keys
-point = (10, 20)
-data = {point: "location"}  # Works!
-
-# Lists cannot
-# point = [10, 20]
-# data = {point: "location"}  # TypeError: unhashable
-
-# Tuples can be set members
-coordinates = {(0, 0), (1, 1), (2, 2)}
-
-# Multiple tuple references might share memory (CPython optimization)
-a = (1, 2, 3)
-b = (1, 2, 3)
-a is b                    # Might be True (small tuples)
-
-# Lists never share memory this way
-a = [1, 2, 3]
-b = [1, 2, 3]
-a is b                    # Always False
-```
-
-## 22. Type Hints (Python 3.5+)
-
-```python
-from typing import List, Tuple, Optional, Union, Any
-
-# Basic
-def process_list(items: List[int]) -> List[str]:
-    return [str(x) for x in items]
-
-# Tuple with specific types
-def get_user() -> Tuple[str, int, bool]:
-    return ("Alice", 30, True)
-
-# Variable length tuple
-def get_scores() -> Tuple[int, ...]:
-    return (95, 87, 92)
-
-# Optional
-def find_item(lst: List[int], target: int) -> Optional[int]:
-    try:
-        return lst.index(target)
-    except ValueError:
-        return None
-
-# Union
-def process(data: Union[List[int], Tuple[int, ...]]) -> int:
-    return sum(data)
-
-# Nested
-matrix: List[List[int]] = [[1, 2], [3, 4]]
-
-# Any type
-mixed: List[Any] = [1, "two", 3.0, [4]]
-
-# Python 3.9+ (lowercase)
-def process_list(items: list[int]) -> list[str]:
-    return [str(x) for x in items]
-```
-
-## 23. Common Interview Questions & Solutions
-
-### **Two Sum**
-```python
-def two_sum(nums: List[int], target: int) -> List[int]:
-    seen = {}
-    for i, num in enumerate(nums):
-        complement = target - num
-        if complement in seen:
-            return [seen[complement], i]
-        seen[num] = i
-    return []
-```
-
-### **Rotate Array**
-```python
-def rotate(nums: List[int], k: int) -> None:
-    k = k % len(nums)
-    nums[:] = nums[-k:] + nums[:-k]
-```
-
-### **Remove Duplicates (in-place)**
-```python
-def remove_duplicates(nums: List[int]) -> int:
-    if not nums:
-        return 0
-    j = 0
-    for i in range(1, len(nums)):
-        if nums[i] != nums[j]:
-            j += 1
-            nums[j] = nums[i]
-    return j + 1
-```
-
-### **Merge Sorted Lists**
-```python
-def merge(nums1: List[int], m: int, nums2: List[int], n: int) -> None:
-    p1, p2, p = m - 1, n - 1, m + n - 1
-    while p2 >= 0:
-        if p1 >= 0 and nums1[p1] > nums2[p2]:
-            nums1[p] = nums1[p1]
-            p1 -= 1
-        else:
-            nums1[p] = nums2[p2]
-            p2 -= 1
-        p -= 1
-```
-
-### **Find Missing Number**
-```python
-def find_missing(nums: List[int]) -> int:
-    n = len(nums)
-    return n * (n + 1) // 2 - sum(nums)
-```
-
-### **Flatten Nested List**
-```python
-def flatten(nested):
-    result = []
-    for item in nested:
-        if isinstance(item, list):
-            result.extend(flatten(item))
-        else:
-            result.append(item)
-    return result
-
-# Example: flatten([[1, 2], [3, [4, 5]]]) -> [1, 2, 3, 4, 5]
-```
-
-## 24. Debugging & Best Practices
-
-### **Debugging Techniques**
-```python
-# Print with index
-lst = ['a', 'b', 'c']
-for i, val in enumerate(lst):
-    print(f"Index {i}: {val}")
-
-# Check type
-type(lst)                 # <class 'list'>
-isinstance(lst, list)     # True
-
-# Check if empty
-if not lst:
-    print("Empty!")
-
-# Shallow vs deep copy visualization
-import copy
-original = [[1, 2], [3, 4]]
-shallow = original.copy()
-deep = copy.deepcopy(original)
-
-shallow[0][0] = 99        # Affects original!
-deep[1][0] = 88           # Doesn't affect original
-```
-
-### **Best Practices**
-
-**DO:**
-```python
-# Use list comprehension for readability
-squared = [x**2 for x in range(10)]
-
-# Use meaningful names
-user_names = ["Alice", "Bob"]  # Good
-x = ["Alice", "Bob"]           # Bad
-
-# Check before accessing
-if lst:
-    first = lst[0]
-
-# Use enumerate for index+value
-for i, val in enumerate(lst):
-    print(i, val)
-
-# Unpack for clarity
-name, age, city = user_data
-```
-
-**DON'T:**
-```python
-# Don't use mutable default arguments
-def bad(lst=[]):           # BAD!
-    lst.append(1)
-    return lst
-
-# Don't modify list while iterating
-for item in lst:
-    if condition:
-        lst.remove(item)   # BAD! (skips items)
-
-# Correct way:
-lst = [x for x in lst if not condition]
-
-# Don't compare with empty list using ==
-if lst == []:              # Works but verbose
+# Check if file exists
+import os
+
+if os.path.exists('file.txt'):
+    with open('file.txt', 'r') as f:
+        content = f.read()
+
+# Check if path is file
+if os.path.isfile('file.txt'):
+    # It's a file
     pass
 
-# Better:
-if not lst:
+# Check if path is directory
+if os.path.isdir('folder'):
+    # It's a directory
     pass
 
-# Don't use + in loops
-result = []
-for item in items:
-    result = result + [item]  # BAD! (O(n²))
+# Try to open with fallback
+try:
+    with open('config.txt', 'r') as f:
+        config = f.read()
+except FileNotFoundError:
+    config = get_default_config()
 
-# Use append or extend:
-result = []
-for item in items:
-    result.append(item)    # GOOD! (O(n))
+# Safe write (atomic-ish)
+import tempfile
+import shutil
+
+with tempfile.NamedTemporaryFile('w', delete=False) as tmp:
+    tmp.write(content)
+    tmp_name = tmp.name
+
+shutil.move(tmp_name, 'file.txt')  # Replace original
 ```
 
-## 25. Python Version Differences
+## 11. File Paths
 
-### **Python 2 vs 3**
+### **Path Operations (os.path)**
 ```python
-# Python 2: range() returned list
-range(5)                  # [0, 1, 2, 3, 4]
+import os
 
-# Python 3: range() returns range object
-range(5)                  # range(0, 5)
-list(range(5))            # [0, 1, 2, 3, 4]
+# Join paths (cross-platform)
+path = os.path.join('folder', 'subfolder', 'file.txt')
+# Linux: folder/subfolder/file.txt
+# Windows: folder\subfolder\file.txt
 
-# Python 2: Comparison of mixed types
-[1, 2] < "string"         # True (in Python 2)
+# Get absolute path
+abs_path = os.path.abspath('file.txt')
+# /home/user/current/file.txt
 
-# Python 3: Comparison raises TypeError
-# [1, 2] < "string"       # TypeError
+# Get directory and filename
+dir_name = os.path.dirname('/path/to/file.txt')   # /path/to
+file_name = os.path.basename('/path/to/file.txt') # file.txt
 
-# Python 2: map() returns list
-map(str, [1, 2, 3])       # ['1', '2', '3']
+# Split extension
+name, ext = os.path.splitext('file.txt')  # ('file', '.txt')
 
-# Python 3: map() returns iterator
-map(str, [1, 2, 3])       # <map object>
-list(map(str, [1, 2, 3])) # ['1', '2', '3']
+# Check existence
+os.path.exists('file.txt')
+os.path.isfile('file.txt')
+os.path.isdir('folder')
+
+# Get file size
+size = os.path.getsize('file.txt')  # Bytes
+
+# Get modification time
+mtime = os.path.getmtime('file.txt')  # Timestamp
+
+# Current directory
+cwd = os.getcwd()
+
+# Change directory
+os.chdir('/path/to/folder')
 ```
 
-### **Modern Features**
+### **pathlib (Modern Approach)**
 ```python
-# Python 3.5+: Extended unpacking
-a, *b, c = [1, 2, 3, 4, 5]
+from pathlib import Path
 
-# Python 3.6+: f-strings
-name = "Alice"
-f"Hello, {name}"
+# Create path object
+p = Path('folder') / 'subfolder' / 'file.txt'
+# Path('folder/subfolder/file.txt')
 
-# Python 3.8+: Walrus operator
-if (n := len(lst)) > 10:
-    print(f"List has {n} items")
+# Read/write directly
+p = Path('file.txt')
+content = p.read_text()           # Read file
+p.write_text('Hello')             # Write file
 
-# Python 3.9+: Union operator
-list1 | list2             # Still not implemented for lists
-# Use: list1 + list2
+# Read binary
+data = p.read_bytes()             # Read binary
+p.write_bytes(b'\x00\x01')        # Write binary
 
-# Python 3.9+: Lowercase type hints
-def func(items: list[int]) -> list[str]:
-    pass
+# Check existence
+p.exists()                        # File exists?
+p.is_file()                       # Is file?
+p.is_dir()                        # Is directory?
 
-# Python 3.10+: Match statement
-match lst:
-    case []:
-        print("empty")
-    case [x]:
-        print(f"one item: {x}")
-    case [x, y]:
-        print(f"two items: {x}, {y}")
-    case _:
-        print("many items")
+# File info
+p.stat().st_size                  # Size in bytes
+p.stat().st_mtime                 # Modification time
+p.suffix                          # '.txt'
+p.stem                            # 'file' (without extension)
+p.name                            # 'file.txt'
+p.parent                          # Path('folder/subfolder')
+
+# Create directory
+p = Path('new_folder')
+p.mkdir(exist_ok=True)            # Create if not exists
+p.mkdir(parents=True, exist_ok=True)  # Create parent dirs too
+
+# List files
+p = Path('.')
+for item in p.iterdir():
+    print(item)
+
+# Glob pattern matching
+for txt_file in p.glob('*.txt'):
+    print(txt_file)
+
+# Recursive glob
+for py_file in p.rglob('*.py'):   # All .py files recursively
+    print(py_file)
+
+# Delete file
+p = Path('file.txt')
+p.unlink()                        # Delete file
+p.unlink(missing_ok=True)         # No error if missing
+
+# Rename/move
+p.rename('new_name.txt')
+
+# Resolve (absolute path)
+p = Path('file.txt')
+abs_p = p.resolve()               # /home/user/current/file.txt
 ```
 
-## 26. Real-World Examples
+## 12. Working with CSV Files
 
-### **Data Processing Pipeline**
 ```python
-# Raw data
-raw_data = ["  Alice:30  ", "Bob:25", "  Charlie:35  "]
+import csv
 
-# Process pipeline
-users = [
-    tuple(item.strip().split(':'))
-    for item in raw_data
-]
-# [('Alice', '30'), ('Bob', '25'), ('Charlie', '35')]
+# Read CSV
+with open('data.csv', 'r') as f:
+    reader = csv.reader(f)
+    for row in reader:
+        print(row)                # List: ['col1', 'col2', 'col3']
 
-# Convert to proper types
-users = [
-    (name, int(age))
-    for name, age in users
-]
+# Read CSV as dict
+with open('data.csv', 'r') as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        print(row)                # Dict: {'name': 'Alice', 'age': '30'}
+        print(row['name'])        # Access by column name
 
-# Filter adults
-adults = [(name, age) for name, age in users if age >= 18]
-```
-
-### **Moving Average**
-```python
-def moving_average(data, window):
-    return [
-        sum(data[i:i+window]) / window
-        for i in range(len(data) - window + 1)
-    ]
-
-prices = [10, 12, 13, 11, 14, 15]
-moving_average(prices, 3)  # [11.67, 12.0, 12.67, 13.33]
-```
-
-### **Group By**
-```python
-from itertools import groupby
-
+# Write CSV
 data = [
-    ('A', 1), ('A', 2), ('B', 3), ('B', 4), ('A', 5)
+    ['Name', 'Age', 'City'],
+    ['Alice', 30, 'NYC'],
+    ['Bob', 25, 'LA']
 ]
 
-# Sort first (required for groupby)
-data.sort(key=lambda x: x[0])
+with open('output.csv', 'w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow(['Name', 'Age'])  # Single row
+    writer.writerows(data)            # Multiple rows
 
-# Group
-for key, group in groupby(data, key=lambda x: x[0]):
-    print(key, list(group))
-# A [('A', 1), ('A', 2), ('A', 5)]
-# B [('B', 3), ('B', 4)]
+# Write CSV from dict
+data = [
+    {'name': 'Alice', 'age': 30},
+    {'name': 'Bob', 'age': 25}
+]
+
+with open('output.csv', 'w', newline='') as f:
+    fieldnames = ['name', 'age']
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
+    writer.writeheader()              # Write header row
+    writer.writerows(data)
+
+# Custom delimiter
+with open('data.tsv', 'r') as f:
+    reader = csv.reader(f, delimiter='\t')
+
+# Handle quotes
+with open('data.csv', 'r') as f:
+    reader = csv.reader(f, quotechar='"', quoting=csv.QUOTE_MINIMAL)
 ```
 
-### **Pagination**
-```python
-def paginate(items, page_size):
-    return [
-        items[i:i+page_size]
-        for i in range(0, len(items), page_size)
-    ]
+## 13. Working with JSON Files
 
-items = list(range(10))
-pages = paginate(items, 3)
-# [[0,1,2], [3,4,5], [6,7,8], [9]]
+```python
+import json
+
+# Read JSON
+with open('data.json', 'r') as f:
+    data = json.load(f)           # Returns dict/list
+
+# Write JSON
+data = {'name': 'Alice', 'age': 30}
+
+with open('output.json', 'w') as f:
+    json.dump(data, f)            # Write to file
+
+# Pretty print JSON
+with open('output.json', 'w') as f:
+    json.dump(data, f, indent=2)  # Indented output
+
+# Convert to/from string
+json_str = json.dumps(data)       # Dict → JSON string
+data = json.loads(json_str)       # JSON string → Dict
+
+# Handle custom objects
+class Person:
+    def __init__(self, name, age):
+        self.name = name
+        self.age = age
+
+def person_encoder(obj):
+    if isinstance(obj, Person):
+        return {'name': obj.name, 'age': obj.age}
+    raise TypeError
+
+person = Person('Alice', 30)
+json_str = json.dumps(person, default=person_encoder)
+
+# Or use dataclasses (Python 3.7+)
+from dataclasses import dataclass, asdict
+
+@dataclass
+class Person:
+    name: str
+    age: int
+
+person = Person('Alice', 30)
+json_str = json.dumps(asdict(person))
 ```
 
-### **LRU Cache (List Implementation)**
+## 14. Temporary Files
+
 ```python
-class LRUCache:
-    def __init__(self, capacity):
-        self.cache = []
-        self.capacity = capacity
+import tempfile
+
+# Temporary file (auto-deleted)
+with tempfile.TemporaryFile('w+') as f:
+    f.write('Temporary data')
+    f.seek(0)
+    print(f.read())
+# File deleted automatically
+
+# Named temporary file
+with tempfile.NamedTemporaryFile('w', delete=False) as f:
+    f.write('Data')
+    temp_path = f.name
+# File exists after context (delete=False)
+
+# Temporary directory
+with tempfile.TemporaryDirectory() as tmpdir:
+    # tmpdir is a path string
+    file_path = os.path.join(tmpdir, 'file.txt')
+    with open(file_path, 'w') as f:
+        f.write('Data')
+# Directory and all contents deleted
+
+# Get temp directory
+temp_dir = tempfile.gettempdir()  # /tmp on Linux
+
+# Create temp file with suffix
+with tempfile.NamedTemporaryFile(suffix='.txt') as f:
+    print(f.name)                 # /tmp/tmp8x9y1z2a.txt
+```
+
+## 15. File Locking
+
+```python
+import fcntl  # Unix only
+
+# Exclusive lock (write)
+with open('file.txt', 'w') as f:
+    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    f.write('Critical section')
+    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+# Shared lock (read)
+with open('file.txt', 'r') as f:
+    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+    content = f.read()
+    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+# Non-blocking lock
+try:
+    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+except IOError:
+    print("File is locked!")
+
+# Cross-platform locking (use portalocker)
+# pip install portalocker
+import portalocker
+
+with open('file.txt', 'w') as f:
+    portalocker.lock(f, portalocker.LOCK_EX)
+    f.write('Data')
+    portalocker.unlock(f)
+```
+
+## 16. Memory-Mapped Files
+
+```python
+import mmap
+
+# Memory-map file (efficient for large files)
+with open('large.txt', 'r+b') as f:
+    mmapped = mmap.mmap(f.fileno(), 0)
     
-    def get(self, key):
-        if key in self.cache:
-            self.cache.remove(key)
-            self.cache.append(key)
-            return key
-        return -1
+    # Read
+    print(mmapped[0:10])          # First 10 bytes
     
-    def put(self, key):
-        if key in self.cache:
-            self.cache.remove(key)
-        elif len(self.cache) >= self.capacity:
-            self.cache.pop(0)
-        self.cache.append(key)
+    # Write
+    mmapped[0:5] = b'Hello'
+    
+    # Search
+    index = mmapped.find(b'pattern')
+    
+    # Close
+    mmapped.close()
+
+# Benefits:
+# - Fast random access
+# - Shared between processes
+# - OS handles caching
+# - Good for large files
+
+# Use case: Database files, large logs
 ```
 
-## 27. Advanced Memory Optimization
+## 17. File Descriptors & Low-Level I/O
 
-### **Generators vs Lists**
 ```python
-# List (stores everything in memory)
-squares_list = [x**2 for x in range(1000000)]  # ~8MB
+import os
 
-# Generator (computes on-the-fly)
-squares_gen = (x**2 for x in range(1000000))   # ~128 bytes
+# Open with file descriptor
+fd = os.open('file.txt', os.O_RDONLY)
+data = os.read(fd, 1024)          # Read 1024 bytes
+os.close(fd)
 
-# Use generator for large datasets
+# Write
+fd = os.open('file.txt', os.O_WRONLY | os.O_CREAT)
+os.write(fd, b'Hello')
+os.close(fd)
+
+# Flags
+os.O_RDONLY                       # Read only
+os.O_WRONLY                       # Write only
+os.O_RDWR                         # Read and write
+os.O_CREAT                        # Create if not exists
+os.O_TRUNC                        # Truncate to zero
+os.O_APPEND                       # Append mode
+os.O_EXCL                         # Fail if exists (with O_CREAT)
+
+# Get file descriptor from file object
+f = open('file.txt', 'r')
+fd = f.fileno()                   # Get underlying FD
+
+# Duplicate file descriptor
+fd2 = os.dup(fd)
+
+# Redirect (advanced)
+os.dup2(fd, 1)                    # Redirect stdout to file
+```
+
+## 18. Performance Optimization
+
+### **Large File Reading**
+```python
+# BAD (loads entire file)
+with open('huge.txt', 'r') as f:
+    content = f.read()            # May crash with MemoryError
+
+# GOOD (line by line)
+with open('huge.txt', 'r') as f:
+    for line in f:
+        process(line)
+
+# GOOD (chunks)
+with open('huge.bin', 'rb') as f:
+    while True:
+        chunk = f.read(8192)      # 8KB chunks
+        if not chunk:
+            break
+        process(chunk)
+
+# Using generator (memory efficient)
+def read_chunks(filename, chunk_size=8192):
+    with open(filename, 'rb') as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+
+for chunk in read_chunks('huge.bin'):
+    process(chunk)
+```
+
+### **Bulk Writing**
+```python
+# BAD (many small writes)
+with open('output.txt', 'w') as f:
+    for i in range(10000):
+        f.write(f'{i}\n')         # 10000 write calls
+
+# GOOD (batch writes)
+lines = [f'{i}\n' for i in range(10000)]
+with open('output.txt', 'w') as f:
+    f.writelines(lines)           # One write call
+
+# BETTER (generator + writelines)
+with open('output.txt', 'w') as f:
+    f.writelines(f'{i}\n' for i in range(10000))
+```
+
+### **Buffer Size Tuning**
+```python
+# Default buffer (good for most)
+with open('file.txt', 'w') as f:
+    f.write(data)
+
+# Larger buffer for bulk operations
+with open('large.txt', 'w', buffering=65536) as f:  # 64KB
+    for data in large_dataset:
+        f.write(data)
+
+# Benchmark different buffer sizes
+import time
+
+sizes = [1024, 8192, 65536]
+for size in sizes:
+    start = time.time()
+    with open('test.txt', 'w', buffering=size) as f:
+        for i in range(100000):
+            f.write(f'{i}\n')
+    print(f'Buffer {size}: {time.time() - start:.2f}s')
+```
+
+## 19. Atomic File Operations
+
+```python
+import os
+import tempfile
+
+# Atomic write (write to temp, then rename)
+def atomic_write(filename, content):
+    # Write to temporary file
+    fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(filename))
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(content)
+        os.replace(temp_path, filename)  # Atomic on POSIX
+    except:
+        os.unlink(temp_path)
+        raise
+
+# Why atomic writes matter:
+# - Power failure during write
+# - Process crash during write
+# - Concurrent readers
+# Atomic replace prevents partial/corrupt files
+
+# Using context manager
+import contextlib
+
+@contextlib.contextmanager
+def atomic_file(filename, mode='w'):
+    fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(filename))
+    try:
+        with os.fdopen(fd, mode) as f:
+            yield f
+        os.replace(temp_path, filename)
+    except:
+        os.unlink(temp_path)
+        raise
+
+# Usage
+with atomic_file('config.json') as f:
+    json.dump(config, f)
+```
+
+## 20. File Compression
+
+### **gzip**
+```python
+import gzip
+
+# Write compressed
+with gzip.open('file.txt.gz', 'wt', encoding='utf-8') as f:
+    f.write('Hello, World!')
+
+# Read compressed
+with gzip.open('file.txt.gz', 'rt', encoding='utf-8') as f:
+    content = f.read()
+
+# Compress existing file
+with open('file.txt', 'rb') as f_in:
+    with gzip.open('file.txt.gz', 'wb') as f_out:
+        f_out.writelines(f_in)
+
+# Or use shutil
+import shutil
+with open('file.txt', 'rb') as f_in:
+    with gzip.open('file.txt.gz', 'wb') as f_out:
+        shutil.copyfileobj(f_in, f_out)
+
+# Decompress
+with gzip.open('file.txt.gz', 'rb') as f_in:
+    with open('file.txt', 'wb') as f_out:
+        shutil.copyfileobj(f_in, f_out)
+```
+
+### **zipfile**
+```python
+import zipfile
+
+# Create zip
+with zipfile.ZipFile('archive.zip', 'w') as zf:
+    zf.write('file1.txt')
+    zf.write('file2.txt')
+    zf.write('folder/file3.txt', arcname='file3.txt')
+
+# Read zip
+with zipfile.ZipFile('archive.zip', 'r') as zf:
+    # List contents
+    for name in zf.namelist():
+        print(name)
+    
+    # Read file
+    content = zf.read('file1.txt')
+    
+    # Extract all
+    zf.extractall('destination_folder')
+    
+    # Extract specific file
+    zf.extract('file1.txt', 'destination_folder')
+
+# Add to existing zip
+with zipfile.ZipFile('archive.zip', 'a') as zf:
+    zf.write('new_file.txt')
+
+# Compress with different algorithm
+with zipfile.ZipFile('archive.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
+    zf.write('file.txt')
+
+# Password protected (write only)
+with zipfile.ZipFile('secure.zip', 'w') as zf:
+    zf.setpassword(b'password')
+    zf.write('secret.txt')
+```
+
+### **tarfile**
+```python
+import tarfile
+
+# Create tar.gz
+with tarfile.open('archive.tar.gz', 'w:gz') as tar:
+    tar.add('file1.txt')
+    tar.add('folder/', recursive=True)
+
+# Create tar (no compression)
+with tarfile.open('archive.tar', 'w') as tar:
+    tar.add('file.txt')
+
+# Create tar.bz2
+with tarfile.open('archive.tar.bz2', 'w:bz2') as tar:
+    tar.add('file.txt')
+
+# Read tar
+with tarfile.open('archive.tar.gz', 'r:gz') as tar:
+    # List contents
+    for member in tar.getmembers():
+        print(member.name)
+    
+    # Extract all
+    tar.extractall('destination')
+    
+    # Extract specific file
+    tar.extract('file.txt', 'destination')
+    
+    # Read file content
+    f = tar.extractfile('file.txt')
+    content = f.read()
+```
+
+## 21. File Watching
+
+```python
+# Using watchdog library
+# pip install watchdog
+
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+class MyHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        print(f'Created: {event.src_path}')
+    
+    def on_modified(self, event):
+        print(f'Modified: {event.src_path}')
+    
+    def on_deleted(self, event):
+        print(f'Deleted: {event.src_path}')
+    
+    def on_moved(self, event):
+        print(f'Moved: {event.src_path} -> {event.dest_path}')
+
+# Watch directory
+observer = Observer()
+observer.schedule(MyHandler(), path='watched_folder', recursive=True)
+observer.start()
+
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    observer.stop()
+
+observer.join()
+
+# Use case: Auto-reload config, log monitoring, file sync
+```
+
+## 22. Stdin/Stdout/Stderr
+
+```python
 import sys
-sys.getsizeof(squares_list)  # ~8000000 bytes
-sys.getsizeof(squares_gen)   # ~128 bytes
+
+# Read from stdin
+line = sys.stdin.readline()       # One line
+lines = sys.stdin.readlines()     # All lines
+
+# Iterate stdin (pipe-friendly)
+for line in sys.stdin:
+    process(line.strip())
+
+# Write to stdout
+sys.stdout.write('Hello\n')
+print('Hello')                    # Same as above
+
+# Write to stderr
+sys.stderr.write('Error!\n')
+print('Error!', file=sys.stderr)  # Same as above
+
+# Check if piped
+if not sys.stdin.isatty():
+    # Data is piped in
+    data = sys.stdin.read()
+
+if not sys.stdout.isatty():
+    # Output is piped/redirected
+    pass
+
+# Redirect stdout to file
+original_stdout = sys.stdout
+with open('output.txt', 'w') as f:
+    sys.stdout = f
+    print('This goes to file')
+sys.stdout = original_stdout
+
+# Context manager for redirection
+from contextlib import redirect_stdout, redirect_stderr
+
+with open('output.txt', 'w') as f:
+    with redirect_stdout(f):
+        print('To file')
+
+# Usage: python script.py < input.txt > output.txt 2> error.txt
 ```
 
-### **Slots for Memory Efficiency**
+## 23. File Permissions
+
 ```python
-# Without slots
-class Point:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+import os
+import stat
 
-# With slots (less memory)
-class Point:
-    __slots__ = ['x', 'y']
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+# Get permissions
+st = os.stat('file.txt')
+mode = st.st_mode
 
-# For list of objects, slots save significant memory
-points = [Point(i, i+1) for i in range(10000)]
+# Check permissions
+is_readable = bool(mode & stat.S_IRUSR)
+is_writable = bool(mode & stat.S_IWUSR)
+is_executable = bool(mode & stat.S_IXUSR)
+
+# Set permissions (Unix)
+os.chmod('file.txt', 0o644)       # rw-r--r--
+os.chmod('file.txt', 0o755)       # rwxr-xr-x
+
+# Using stat constants
+os.chmod('file.txt', stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+
+# Change owner (Unix, requires privileges)
+os.chown('file.txt', uid, gid)
+
+# Get file info
+st = os.stat('file.txt')
+st.st_size                        # Size in bytes
+st.st_mtime                       # Last modified time
+st.st_atime                       # Last access time
+st.st_ctime                       # Creation time (Windows) / metadata change (Unix)
+st.st_uid                         # Owner user ID
+st.st_gid                         # Owner group ID
+
+# Using pathlib
+from pathlib import Path
+p = Path('file.txt')
+p.chmod(0o644)
+st = p.stat()
 ```
 
-### **Array Module for Numeric Data**
+## 24. Directory Operations
+
 ```python
-import array
+import os
+import shutil
+from pathlib import Path
 
-# List of integers (8 bytes each + overhead)
-lst = [1, 2, 3, 4, 5] * 1000  # ~40KB
+# Create directory
+os.mkdir('new_folder')
+os.makedirs('parent/child/grandchild', exist_ok=True)
 
-# Array of integers (4 bytes each, no overhead)
-arr = array.array('i', [1, 2, 3, 4, 5] * 1000)  # ~20KB
+# Using pathlib
+Path('new_folder').mkdir(exist_ok=True)
+Path('parent/child').mkdir(parents=True, exist_ok=True)
 
-# 50% memory savings for large numeric datasets
+# Remove directory
+os.rmdir('empty_folder')          # Only empty dirs
+shutil.rmtree('folder')           # Recursive delete
+
+Path('folder').rmdir()            # Only empty
+# No recursive delete in pathlib, use shutil
+
+# List directory
+entries = os.listdir('folder')    # Returns list of names
+
+# Better: scandir (returns DirEntry objects)
+with os.scandir('folder') as it:
+    for entry in it:
+        print(entry.name)
+        print(entry.is_file())
+        print(entry.is_dir())
+        print(entry.stat())
+
+# Using pathlib
+for item in Path('folder').iterdir():
+    print(item)
+    print(item.is_file())
+    print(item.is_dir())
+
+# Recursive listing
+for root, dirs, files in os.walk('folder'):
+    for file in files:
+        full_path = os.path.join(root, file)
+        print(full_path)
+
+# Using pathlib glob
+for py_file in Path('.').rglob('*.py'):
+    print(py_file)
+
+# Copy directory
+shutil.copytree('source', 'destination')
+
+# Copy with overwrite (Python 3.8+)
+shutil.copytree('source', 'dest', dirs_exist_ok=True)
+
+# Move/rename directory
+shutil.move('old_name', 'new_name')
+
+# Current directory
+cwd = os.getcwd()
+cwd = Path.cwd()
+
+# Change directory
+os.chdir('folder')
+
+# Home directory
+home = Path.home()                # /home/user
 ```
 
-## 28. Testing & Validation
+## 25. File System Operations
 
 ```python
-import unittest
+import os
+import shutil
 
-class TestListOperations(unittest.TestCase):
-    def test_empty_list(self):
-        lst = []
-        self.assertEqual(len(lst), 0)
-        self.assertFalse(lst)
+# Copy file
+shutil.copy('source.txt', 'dest.txt')           # Copy file
+shutil.copy2('source.txt', 'dest.txt')          # Copy with metadata
+shutil.copyfile('source.txt', 'dest.txt')       # Copy content only
+
+# Move/rename file
+shutil.move('old.txt', 'new.txt')
+os.rename('old.txt', 'new.txt')
+
+# Delete file
+os.remove('file.txt')
+os.unlink('file.txt')                           # Same as remove
+Path('file.txt').unlink(missing_ok=True)
+
+# Check before delete
+if os.path.exists('file.txt'):
+    os.remove('file.txt')
+
+# Get disk usage
+total, used, free = shutil.disk_usage('/')
+print(f'Total: {total // (2**30)} GB')
+print(f'Used: {used // (2**30)} GB')
+print(f'Free: {free // (2**30)} GB')
+
+# File links (Unix)
+os.symlink('target.txt', 'link.txt')            # Symbolic link
+os.link('target.txt', 'hard_link.txt')          # Hard link
+
+# Check if link
+os.path.islink('link.txt')
+Path('link.txt').is_symlink()
+
+# Read link target
+os.readlink('link.txt')
+Path('link.txt').readlink()
+
+# Resolve link to real path
+os.path.realpath('link.txt')
+Path('link.txt').resolve()
+```
+
+## 26. Context Managers
+
+### **Multiple Files**
+```python
+# Multiple with statements
+with open('input.txt', 'r') as f_in:
+    with open('output.txt', 'w') as f_out:
+        content = f_in.read()
+        f_out.write(content)
+
+# Single statement (Python 2.7+)
+with open('input.txt', 'r') as f_in, open('output.txt', 'w') as f_out:
+    content = f_in.read()
+    f_out.write(content)
+
+# ExitStack for dynamic number of files
+from contextlib import ExitStack
+
+with ExitStack() as stack:
+    files = [stack.enter_context(open(f'file{i}.txt', 'r')) 
+             for i in range(10)]
+    # All files auto-close
+```
+
+### **Custom Context Manager**
+```python
+# Using class
+class FileManager:
+    def __init__(self, filename, mode):
+        self.filename = filename
+        self.mode = mode
+        self.file = None
     
-    def test_append(self):
-        lst = [1, 2]
-        lst.append(3)
-        self.assertEqual(lst, [1, 2, 3])
+    def __enter__(self):
+        self.file = open(self.filename, self.mode)
+        return self.file
     
-    def test_slicing(self):
-        lst = [1, 2, 3, 4, 5]
-        self.assertEqual(lst[1:3], [2, 3])
-        self.assertEqual(lst[::-1], [5, 4, 3, 2, 1])
-    
-    def test_tuple_immutability(self):
-        tup = (1, 2, 3)
-        with self.assertRaises(TypeError):
-            tup[0] = 99
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.file:
+            self.file.close()
+        # Return True to suppress exceptions
+        return False
 
-# Run tests
-# unittest.main()
+with FileManager('file.txt', 'r') as f:
+    content = f.read()
+
+# Using contextlib
+from contextlib import contextmanager
+
+@contextmanager
+def file_manager(filename, mode):
+    f = open(filename, mode)
+    try:
+        yield f
+    finally:
+        f.close()
+
+with file_manager('file.txt', 'r') as f:
+    content = f.read()
 ```
 
-## 29. Cheat Sheet Summary
+## 27. Edge Cases & Gotchas
+
+### **Newline Handling**
+```python
+# Windows: \r\n (CRLF)
+# Unix/Mac: \n (LF)
+# Old Mac: \r (CR)
+
+# Text mode auto-converts
+with open('file.txt', 'r') as f:      # Auto-converts \r\n to \n
+    content = f.read()
+
+# Binary mode preserves
+with open('file.txt', 'rb') as f:     # Keeps original \r\n
+    content = f.read()
+
+# Disable newline translation
+with open('file.txt', 'r', newline='') as f:
+    content = f.read()                # Keeps \r\n in text mode
+
+# For CSV, use newline=''
+with open('data.csv', 'w', newline='') as f:
+    writer = csv.writer(f)
+```
+
+### **Encoding Issues**
+```python
+# Problem: Wrong encoding
+with open('file.txt', 'r') as f:      # Uses system default
+    content = f.read()                # May fail with UnicodeDecodeError
+
+# Solution: Explicit encoding
+with open('file.txt', 'r', encoding='utf-8') as f:
+    content = f.read()
+
+# Detect encoding (use chardet)
+# pip install chardet
+import chardet
+
+with open('file.txt', 'rb') as f:
+    raw = f.read()
+    result = chardet.detect(raw)
+    encoding = result['encoding']
+
+with open('file.txt', 'r', encoding=encoding) as f:
+    content = f.read()
+
+# Handle errors
+with open('file.txt', 'r', encoding='utf-8', errors='replace') as f:
+    content = f.read()                # Replace bad chars with �
+```
+
+### **File Already Open**
+```python
+# Problem: File left open
+f = open('file.txt', 'r')
+content = f.read()
+# Forgot to close!
+
+# Open again in write mode
+# f2 = open('file.txt', 'w')        # May fail or corrupt on some systems
+
+# Solution: Always use context manager
+with open('file.txt', 'r') as f:
+    content = f.read()
+# Auto-closed
+
+# Check if file is closed
+print(f.closed)                       # True
+```
+
+### **Race Conditions**
+```python
+# BAD: Check-then-act race
+if not os.path.exists('file.txt'):
+    # File could be created here by another process!
+    with open('file.txt', 'w') as f:
+        f.write('data')
+
+# GOOD: Try-except
+try:
+    with open('file.txt', 'x') as f:  # Exclusive create
+        f.write('data')
+except FileExistsError:
+    pass
+
+# GOOD: Atomic operations
+# Use 'x' mode, file locks, or atomic writes
+```
+
+### **Path Separators**
+```python
+# BAD: Hardcoded separators
+path = 'folder/subfolder/file.txt'    # Fails on Windows
+path = 'folder\\subfolder\\file.txt'  # Fails on Unix
+
+# GOOD: os.path.join
+path = os.path.join('folder', 'subfolder', 'file.txt')
+
+# BETTER: pathlib
+path = Path('folder') / 'subfolder' / 'file.txt'
+```
+
+### **File Descriptor Leaks**
+```python
+# BAD: Multiple opens without close
+for i in range(10000):
+    f = open(f'file{i}.txt', 'r')
+    content = f.read()
+    # No close! Eventually hits OS limit
+
+# GOOD: Always close
+for i in range(10000):
+    with open(f'file{i}.txt', 'r') as f:
+        content = f.read()
+```
+
+### **Writing Empty Files**
+```python
+# 'w' mode creates empty file immediately
+with open('file.txt', 'w') as f:
+    # File is now empty!
+    if error_condition:
+        return  # Original content lost!
+
+# Solution: Write to temp, then rename
+with tempfile.NamedTemporaryFile('w', delete=False) as tmp:
+    tmp.write(content)
+    temp_name = tmp.name
+
+os.replace(temp_name, 'file.txt')
+```
+
+## 28. Performance Benchmarks
 
 ```python
-# CREATION
-lst = [1, 2, 3]                    # List
-tup = (1, 2, 3)                    # Tuple
-lst = list(range(5))               # [0, 1, 2, 3, 4]
-lst = [x*2 for x in range(5)]      # [0, 2, 4, 6, 8]
+import time
 
-# ACCESS
-lst[0], lst[-1]                    # First, last
-lst[1:3], lst[::2], lst[::-1]      # Slice, step, reverse
+# Benchmark: read methods
+file_size = 100_000_000  # 100MB
 
-# MODIFY (list only)
-lst.append(x)                      # Add to end
-lst.extend([x, y])                 # Add multiple
-lst.insert(i, x)                   # Insert at position
-lst.remove(x)                      # Remove first x
-lst.pop()                          # Remove & return last
-lst[i] = x                         # Replace item
+# Method 1: read() - Fastest for small files
+start = time.time()
+with open('large.txt', 'r') as f:
+    content = f.read()
+print(f'read(): {time.time() - start:.2f}s')
 
-# SEARCH
-x in lst                           # Membership
-lst.index(x)                       # Find index
-lst.count(x)                       # Count occurrences
+# Method 2: readlines() - Fast but memory-intensive
+start = time.time()
+with open('large.txt', 'r') as f:
+    lines = f.readlines()
+print(f'readlines(): {time.time() - start:.2f}s')
 
-# SORT/REVERSE
-lst.sort()                         # In-place sort
-sorted(lst)                        # Return new sorted
-lst.reverse()                      # In-place reverse
-lst[::-1]                          # Return new reversed
+# Method 3: readline() loop - Slow
+start = time.time()
+with open('large.txt', 'r') as f:
+    while f.readline():
+        pass
+print(f'readline(): {time.time() - start:.2f}s')
 
-# AGGREGATE
-len(lst), sum(lst)                 # Length, sum
-max(lst), min(lst)                 # Max, min
-any(lst), all(lst)                 # Any true, all true
+# Method 4: iteration - Fast and memory-efficient
+start = time.time()
+with open('large.txt', 'r') as f:
+    for line in f:
+        pass
+print(f'iteration: {time.time() - start:.2f}s')
 
-# ITERATION
-for x in lst: ...                  # Simple loop
-for i, x in enumerate(lst): ...    # With index
-[f(x) for x in lst if cond]        # Comprehension
-
-# UNPACKING
-a, b, c = [1, 2, 3]                # Basic
-a, *b, c = [1, 2, 3, 4, 5]         # Extended (a=1, b=[2,3,4], c=5)
-
-# COPY
-new = lst.copy()                   # Shallow copy
-new = lst[:]                       # Same
-import copy; new = copy.deepcopy(lst)  # Deep copy
-
-# COMBINE
-lst1 + lst2                        # Concatenate
-lst * 3                            # Repeat
-zip(lst1, lst2)                    # Combine parallel lists
+# Typical results:
+# read(): 0.5s (loads all)
+# readlines(): 0.6s (loads all)
+# readline(): 3.0s (many function calls)
+# iteration: 0.5s (buffered, efficient)
 ```
 
-## 30. Final Tips & Reminders
+## 29. Common Patterns
 
-✅ **Remember:**
-- Lists are mutable, tuples are immutable
-- Use tuples for data that shouldn't change
-- List comprehensions > map/filter
-- Don't modify list while iterating over it
-- Shallow copy vs deep copy matters for nested structures
-- Single element tuple needs comma: `(1,)`
-- Empty list check: `if not lst:`
-- Use `extend()` not `+` for adding multiple items
-- `append()` is O(1), `insert(0, x)` is O(n)
-- Tuples can be dict keys, lists cannot
+### **Process Large File**
+```python
+def process_large_file(filename):
+    with open(filename, 'r') as f:
+        for line in f:
+            # Process line by line
+            data = parse(line)
+            yield data
 
-⚡ **Performance:**
-- Tuple operations are faster than list
-- Use generators for large datasets
-- Pre-allocate lists when size is known
-- Use `deque` for frequent insertions/deletions at both ends
-- Use `array.array` for large numeric datasets
+for record in process_large_file('huge.log'):
+    handle(record)
+```
 
-🐛 **Common Bugs:**
-- Mutable default arguments
-- Modifying list during iteration
-- Reference vs copy confusion
-- List multiplication creating references
-- Forgetting comma in single-element tuple
+### **Read Configuration**
+```python
+def read_config(filename):
+    config = {}
+    try:
+        with open(filename, 'r') as f:
+            for line in f:
+                key, value = line.strip().split('=')
+                config[key] = value
+    except FileNotFoundError:
+        config = get_defaults()
+    return config
+```
 
-🎯 **Best Use Cases:**
-- **List**: Shopping cart, todo list, log entries, dynamic collections
-- **Tuple**: Coordinates, RGB colors, database records, function returns, dict keys
+### **Backup Before Write**
+```python
+def safe_write(filename, content):
+    if os.path.exists(filename):
+        # Create backup
+        shutil.copy(filename, f'{filename}.bak')
+    
+    try:
+        with open(filename, 'w') as f:
+            f.write(content)
+    except:
+        # Restore backup on error
+        if os.path.exists(f'{filename}.bak'):
+            shutil.copy(f'{filename}.bak', filename)
+        raise
+```
+
+### **Tail File (Last N Lines)**
+```python
+def tail(filename, n=10):
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+        return lines[-n:]
+
+# Memory efficient (for huge files)
+from collections import deque
+
+def tail_efficient(filename, n=10):
+    with open(filename, 'r') as f:
+        return deque(f, maxlen=n)
+```
+
+### **Count Lines Efficiently**
+```python
+def count_lines(filename):
+    count = 0
+    with open(filename, 'rb') as f:
+        for line in f:
+            count += 1
+    return count
+
+# Faster for very large files
+def count_lines_fast(filename):
+    with open(filename, 'rb') as f:
+        return sum(1 for _ in f)
+
+# Even faster with buffer
+def count_lines_buffer(filename):
+    with open(filename, 'rb') as f:
+        return sum(chunk.count(b'\n') for chunk in iter(lambda: f.read(1024*1024), b''))
+```
+
+### **File Rotation**
+```python
+def rotate_file(filename, max_size=1024*1024):
+    """Rotate file when exceeds max_size"""
+    if not os.path.exists(filename):
+        return
+    
+    if os.path.getsize(filename) > max_size:
+        # Rename to .1, .2, etc.
+        i = 1
+        while os.path.exists(f'{filename}.{i}'):
+            i += 1
+        os.rename(filename, f'{filename}.{i}')
+```
+
+## 30. Best Practices Summary
+
+### **✅ DO:**
+```python
+# Always use context manager
+with open('file.txt', 'r') as f:
+    content = f.read()
+
+# Specify encoding explicitly
+with open('file.txt', 'r', encoding='utf-8') as f:
+    pass
+
+# Use pathlib for path operations
+from pathlib import Path
+p = Path('folder') / 'file.txt'
+
+# Iterate for large files
+for line in f:
+    process(line)
+
+# Use 'x' mode to prevent overwriting
+with open('file.txt', 'x') as f:
+    f.write('data')
+
+# Use binary mode for non-text
+with open('image.png', 'rb') as f:
+    data = f.read()
+
+# Check file exists before opening
+if Path('file.txt').exists():
+    pass
+
+# Use atomic writes for critical data
+# (write to temp, then rename)
+
+# Close files in finally block if not using context manager
+f = None
+try:
+    f = open('file.txt', 'r')
+finally:
+    if f:
+        f.close()
+```
+
+### **❌ DON'T:**
+```python
+# Don't forget to close
+f = open('file.txt', 'r')
+content = f.read()
+# No close!
+
+# Don't use system default encoding
+with open('file.txt', 'r') as f:  # Encoding depends on system!
+    pass
+
+# Don't read huge files with .read()
+content = open('huge.txt').read()  # Memory error!
+
+# Don't use 'w' mode carelessly
+with open('important.txt', 'w') as f:  # Erases content!
+    pass
+
+# Don't hardcode path separators
+path = 'folder\\file.txt'  # Fails on Unix
+
+# Don't ignore exceptions
+try:
+    f = open('file.txt', 'r')
+except:
+    pass  # Silent failure!
+
+# Don't modify file while reading
+with open('file.txt', 'r+') as f:
+    for line in f:
+        f.write(line.upper())  # Dangerous!
+
+# Don't assume file exists
+f = open('file.txt', 'r')  # May raise FileNotFoundError
+```
+
+## 31. Quick Reference
+
+```python
+# OPEN
+with open('file.txt', 'r') as f:              # Read text
+with open('file.txt', 'w') as f:              # Write text (overwrites!)
+with open('file.txt', 'a') as f:              # Append text
+with open('file.bin', 'rb') as f:             # Read binary
+with open('file.txt', 'r', encoding='utf-8')  # Explicit encoding
+
+# READ
+f.read()                                      # Read all
+f.read(n)                                     # Read n bytes
+f.readline()                                  # Read one line
+f.readlines()                                 # Read all lines as list
+for line in f:                                # Iterate (best)
+
+# WRITE
+f.write(string)                               # Write string
+f.writelines(list)                            # Write list of strings
+print('text', file=f)                         # Print to file
+
+# POSITION
+f.tell()                                      # Current position
+f.seek(0)                                     # Go to start
+f.seek(0, 2)                                  # Go to end
+
+# PROPERTIES
+f.closed                                      # Is closed?
+f.name                                        # Filename
+f.mode                                        # Mode ('r', 'w', etc.)
+
+# PATH (pathlib)
+from pathlib import Path
+p = Path('file.txt')
+p.exists()                                    # File exists?
+p.read_text()                                 # Read file
+p.write_text('data')                          # Write file
+p.unlink()                                    # Delete file
+
+# OS
+import os
+os.path.exists('file.txt')                    # Exists?
+os.path.getsize('file.txt')                   # Size in bytes
+os.remove('file.txt')                         # Delete
+shutil.copy('src.txt', 'dst.txt')             # Copy
+```
+
+## 32. Final Reminders
+
+**🔑 Key Concepts:**
+- Files have buffers - data sits in memory before disk
+- Close files to flush buffers and release resources
+- Context managers (`with`) auto-close even on exception
+- Text mode handles encoding, binary mode doesn't
+- File position matters - reading moves the cursor
+
+**⚡ Performance:**
+- Iterate large files line-by-line, don't load all
+- Use larger buffer sizes for bulk I/O
+- Binary mode is faster than text mode
+- Batch writes instead of many small writes
+
+**🛡️ Safety:**
+- Always specify encoding for text files
+- Use `with` statement (context manager)
+- Use 'x' mode to prevent accidental overwrites
+- Atomic writes for critical data (temp + rename)
+- Handle FileNotFoundError gracefully
+
+**🐛 Common Mistakes:**
+- Forgetting to close files
+- Using 'w' mode on existing files (data loss!)
+- Reading entire large file into memory
+- Wrong/missing encoding
+- Modifying file while iterating
+- Platform-specific path separators
+
+**🎯 Best Tools:**
+- `pathlib` for modern path handling
+- Context managers for automatic cleanup
+- Iteration for memory-efficient reading
+- `shutil` for high-level file operations
+- `tempfile` for temporary files
