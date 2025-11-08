@@ -1,2503 +1,1832 @@
-# Python File Handling: Deep Dive Guide
+# Python File Handling: Complete Guide
 
-> **Philosophy**: Understanding files requires understanding the OS, memory, and I/O architecture. This guide explains the **WHY** behind every pattern.
+## 1. File Basics & Concepts
 
-## Part 1: Core Concepts & Mental Models
+### **What is a File?**
+- Named location on disk storing data
+- Two types: **Text files** (human-readable) and **Binary files** (machine-readable)
+- Has path, name, extension, permissions
 
-### 1.1 The File Abstraction: What Really Happens?
-
-**Mental Model: The Three-Layer Hierarchy**
+### **File System Hierarchy**
 ```
-Your Python Code
-    ↓
-Python File Object (buffer in RAM)
-    ↓
-OS Kernel (system calls)
-    ↓
-File System (disk blocks)
-    ↓
-Physical Disk (magnetic/SSD)
+Absolute path: /home/user/documents/file.txt (Linux/Mac)
+               C:\Users\user\Documents\file.txt (Windows)
+Relative path: ./file.txt (current directory)
+               ../file.txt (parent directory)
 ```
 
-**Why This Matters:**
-```python
-# When you write code like this:
-with open('file.txt', 'w') as f:
-    f.write('Hello')
-# File auto-closes when exiting with block
-
-# What ACTUALLY happens:
-# 1. Python asks OS: "Give me file descriptor for 'file.txt'"
-# 2. OS checks permissions, creates inode (metadata), returns FD (integer)
-# 3. Python wraps FD in file object with buffer (default 8KB)
-# 4. write() puts data in BUFFER (not disk yet!)
-# 5. On __exit__: flush buffer → OS write queue → disk controller → physical write
-# 6. OS closes FD, releases locks
-
-# Time breakdown (approximate):
-# - Getting FD from OS: 100 microseconds
-# - Writing to buffer: 100 nanoseconds (1000x faster!)
-# - Flushing to OS: 500 microseconds
-# - Physical disk write: 5-10 milliseconds (100,000x slower than buffer!)
+### **File Operations Flow**
+```
+1. Open file    → Get file object (handle)
+2. Read/Write   → Perform operations
+3. Close file   → Release resources (critical!)
 ```
 
-**The Psychology: Why Buffering Exists**
-- **Problem**: Disk I/O is ~100,000x slower than RAM
-- **Solution**: Batch writes in memory, flush occasionally
-- **Trade-off**: Data loss if crash before flush vs performance gain
+### **Why Close Files?**
+- **Flush buffers**: Ensures data written to disk
+- **Release file locks**: Other processes can access
+- **Free system resources**: Prevents resource leak
+- **Data integrity**: Incomplete writes without close
+
+## 2. File Modes
+
+| Mode | Description | Creates | Overwrites | Position | Read | Write |
+|------|-------------|---------|------------|----------|------|-------|
+| `r` | Read (text) | No | No | Start | ✓ | ✗ |
+| `w` | Write (text) | Yes | Yes | Start | ✗ | ✓ |
+| `a` | Append (text) | Yes | No | End | ✗ | ✓ |
+| `x` | Exclusive create | Yes | Error if exists | Start | ✗ | ✓ |
+| `r+` | Read + Write | No | No | Start | ✓ | ✓ |
+| `w+` | Write + Read | Yes | Yes | Start | ✓ | ✓ |
+| `a+` | Append + Read | Yes | No | End | ✓ | ✓ |
+| `rb` | Read binary | No | No | Start | ✓ | ✗ |
+| `wb` | Write binary | Yes | Yes | Start | ✗ | ✓ |
+| `ab` | Append binary | Yes | No | End | ✗ | ✓ |
 
 ```python
-# Without buffering (hypothetical):
-for i in range(10000):
-    f.write(f'{i}\n')  # 10,000 disk writes = 50-100 seconds!
+# Common modes explained
+f = open('file.txt', 'r')     # Read only (default)
+f = open('file.txt', 'w')     # Write only (DANGER: erases content!)
+f = open('file.txt', 'a')     # Append only (safe)
+f = open('file.txt', 'r+')    # Read and write (doesn't erase)
+f = open('file.txt', 'w+')    # Write and read (ERASES content!)
 
-# With buffering (reality):
-for i in range(10000):
-    f.write(f'{i}\n')  # ~125 disk writes (8KB buffer) = 0.5 seconds
+# Binary mode
+f = open('image.png', 'rb')   # Read binary
+f = open('image.png', 'wb')   # Write binary
+
+# Exclusive mode (fails if exists)
+f = open('file.txt', 'x')     # FileExistsError if file exists
 ```
 
-### 1.2 File Descriptors: The Core Abstraction
+## 3. Opening Files
 
-**Concept**: File descriptor (FD) is an integer the OS uses to track open files
-
+### **Basic Syntax**
 ```python
-import os
+# Manual open/close
+f = open('file.txt', 'r')
+content = f.read()
+f.close()                     # Must close!
 
-fd = os.open('file.txt', os.O_RDONLY)  # Returns integer (e.g., 3)
-# Standard FDs: 0=stdin, 1=stdout, 2=stderr
-# Your files get: 3, 4, 5, 6...
-
-# OS maintains per-process table:
-# FD → inode (file metadata)
-# FD → file offset (current position)
-# FD → access mode (read/write)
-# FD → file locks
-
-# Why integers? Fast array lookup in kernel
+# With context manager (BEST PRACTICE)
+with open('file.txt', 'r') as f:
+    content = f.read()
+# Auto-closes, even if exception occurs
 ```
 
-**Real Issue: FD Leaks**
+### **Why Context Manager?**
 ```python
-# BAD: OS limit on FDs (typically 1024 per process)
-for i in range(2000):
-    f = open(f'file{i}.txt', 'r')  # Leak!
-    # After ~1000 iterations: "Too many open files"
+# Manual close (RISKY)
+f = open('file.txt', 'r')
+data = f.read()
+result = process(data)        # If this raises exception...
+f.close()                     # ...this never runs!
 
-# Debugging FD leaks in production:
-import subprocess
-pid = os.getpid()
-# Linux: ls -la /proc/{pid}/fd | wc -l
-# Shows how many FDs your process has open
-```
-
-**Best Practice: Context Managers Guarantee Cleanup**
-```python
-# Even if exception, FD is closed
+# Context manager (SAFE)
 with open('file.txt', 'r') as f:
     data = f.read()
-    1/0  # Exception!
-# File is STILL closed here (FD released)
-
-# Why? Python's with statement guarantees __exit__ runs
-# Like finally block but cleaner
+    result = process(data)    # Even if exception, file closes
 ```
 
-### 1.3 The Buffer: RAM vs Disk Mental Model
-
-**Visualization:**
-```
-┌─────────────────────────┐
-│   Your Program (RAM)    │
-│  ┌──────────────────┐   │
-│  │  File Buffer     │   │ ← write() goes here (fast)
-│  │  (8KB default)   │   │
-│  └────────┬─────────┘   │
-│           │ flush()     │
-└───────────┼─────────────┘
-            ↓
-┌───────────────────────────┐
-│    OS Write Queue         │ ← OS batches writes
-└───────────┬───────────────┘
-            ↓
-┌───────────────────────────┐
-│  Disk Controller Cache    │ ← Hardware cache
-└───────────┬───────────────┘
-            ↓
-┌───────────────────────────┐
-│   Physical Disk Sectors   │ ← Actual persistence
-└───────────────────────────┘
-```
-
-**Buffer Sizes: The Psychology**
+### **Encoding**
 ```python
-# Default: 8192 bytes (8KB) - Why?
-# - Typical disk block size: 4KB
-# - 8KB = 2 blocks = good balance
-# - Too small: too many flushes
-# - Too large: memory waste
-
-# Tuning for use cases:
-
-# 1. Logging (frequent small writes)
-with open('app.log', 'a', buffering=1) as f:  # Line buffering
-    f.write('Error\n')  # Flushed immediately on \n
-    # Why? Logs must be visible NOW for debugging
-
-# 2. Bulk data export (large sequential writes)
-with open('export.csv', 'w', buffering=65536) as f:  # 64KB
-    for row in million_rows:
-        f.write(csv_format(row))
-    # Why? Amortize flush overhead across more writes
-
-# 3. Real-time sensor data (critical writes)
-with open('sensor.dat', 'wb', buffering=0) as f:  # No buffer
-    f.write(sensor_bytes)
-    # Why? Data loss unacceptable, performance secondary
-
-# 4. Network file systems (high latency)
-with open('nfs_file.txt', 'w', buffering=1048576) as f:  # 1MB
-    # Why? Network latency dominates, batch aggressively
-```
-
-### 1.4 Text vs Binary: Encoding Deep Dive
-
-**The Core Problem: Computers Only Understand Bytes**
-```python
-# Text mode: bytes ↔ strings (with encoding)
-with open('file.txt', 'w', encoding='utf-8') as f:
-    f.write('Hello')  # String
-    # Internally: 'Hello' → b'Hello' (ASCII overlap)
-    # But: 'こんにちは' → b'\xe3\x81\x93\xe3\x82\x93\xe3\x81\xab\xe3\x81\xa1\xe3\x81\xaf'
-
-# Binary mode: raw bytes
-with open('file.txt', 'wb') as f:
-    f.write(b'Hello')  # Must be bytes
-```
-
-**Why UTF-8 Won**
-```
-ASCII:    1 byte per char (English only)
-Latin-1:  1 byte per char (Western Europe)
-UTF-16:   2-4 bytes per char (fixed width for BMP)
-UTF-8:    1-4 bytes per char (variable, ASCII-compatible)
-
-UTF-8 advantages:
-✓ ASCII files are valid UTF-8 (backward compatible)
-✓ Variable length (efficient for English, supports all Unicode)
-✓ No byte-order mark needed (unlike UTF-16)
-✓ Self-synchronizing (can find char boundaries)
-✗ Variable length = can't random access by char index
-```
-
-**Real-World Encoding Issues**
-```python
-# Issue 1: Platform defaults differ
-# Windows: cp1252 (legacy)
+# Text files default encoding
 # Linux/Mac: UTF-8
+# Windows: cp1252 (locale-dependent)
 
-# BAD: Relies on platform default
-with open('file.txt', 'w') as f:  # Encoding = ???
-    f.write('café')
-# Works on Linux, breaks on Windows!
-
-# GOOD: Explicit encoding
-with open('file.txt', 'w', encoding='utf-8') as f:
-    f.write('café')
-
-# Issue 2: BOM (Byte Order Mark)
-# UTF-8 file might start with: EF BB BF
-# Some editors add BOM, confuses parsers
-
-with open('file.txt', 'r', encoding='utf-8-sig') as f:  # Strips BOM
+# Explicit encoding (RECOMMENDED)
+with open('file.txt', 'r', encoding='utf-8') as f:
     content = f.read()
 
-# Issue 3: Mixed encodings in legacy data
-def detect_and_read(filename):
-    """Handle unknown encodings"""
-    try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            return f.read()
-    except UnicodeDecodeError:
-        # Fallback to latin-1 (never fails, accepts all bytes)
-        with open(filename, 'r', encoding='latin-1') as f:
-            return f.read()
+# Common encodings
+# utf-8: Universal, supports all languages
+# ascii: English only (7-bit)
+# latin-1: Western European
+# cp1252: Windows default
+# utf-16: Wide characters
 
-# Production approach: Use chardet library
-import chardet
+# Handle encoding errors
+with open('file.txt', 'r', encoding='utf-8', errors='ignore') as f:
+    content = f.read()        # Skip invalid characters
 
-def smart_read(filename):
-    with open(filename, 'rb') as f:
-        raw = f.read()
-    detected = chardet.detect(raw)
-    encoding = detected['encoding']
-    return raw.decode(encoding)
+# errors parameter:
+# 'strict': Raise exception (default)
+# 'ignore': Skip invalid chars
+# 'replace': Replace with �
+# 'backslashreplace': Replace with \xNN
 ```
 
-### 1.5 File Modes: Decision Tree
+## 4. Reading Files
 
-```
-Need to create new file?
-├─ Yes → Need exclusive (fail if exists)?
-│  ├─ Yes → 'x' (safe for config init)
-│  └─ No → Need to keep existing?
-│     ├─ Yes → 'a' (logs, append-only)
-│     └─ No → 'w' (DANGER: deletes existing!)
-└─ No (file must exist) → Need to write?
-   ├─ Yes → 'r+' (read/write, no truncate)
-   └─ No → 'r' (read-only, safe)
-
-Binary file? Add 'b' to any mode above
-```
-
-**Mode Psychology:**
+### **read() - Read Entire File**
 ```python
-# 'r' - Safest (read-only, won't corrupt)
-with open('data.txt', 'r') as f:
-    # Can't accidentally destroy data
+with open('file.txt', 'r') as f:
+    content = f.read()        # Returns entire file as string
+
+# Read n bytes
+with open('file.txt', 'r') as f:
+    chunk = f.read(10)        # Read first 10 characters
+
+# Read all
+with open('file.txt', 'r') as f:
+    all_content = f.read()    # Empty string if at EOF
+    more_content = f.read()   # Returns '' (empty)
+```
+
+### **readline() - Read One Line**
+```python
+with open('file.txt', 'r') as f:
+    line1 = f.readline()      # Includes \n at end
+    line2 = f.readline()      # Next line
+    line3 = f.readline()      # Returns '' at EOF
+
+# Remove newline
+line = f.readline().strip()   # Remove leading/trailing whitespace
+line = f.readline().rstrip()  # Remove trailing only
+```
+
+### **readlines() - Read All Lines**
+```python
+with open('file.txt', 'r') as f:
+    lines = f.readlines()     # Returns list of strings
+
+# Example: ['line1\n', 'line2\n', 'line3']
+
+# Memory concern: Loads entire file into memory
+# For large files, use iteration instead
+```
+
+### **Iteration (BEST for Large Files)**
+```python
+# Most efficient way
+with open('file.txt', 'r') as f:
+    for line in f:            # Reads one line at a time
+        print(line.strip())   # Memory efficient!
+
+# Why iteration is best:
+# - Memory efficient (doesn't load all at once)
+# - Pythonic and readable
+# - Fast for large files
+```
+
+### **Read Comparison**
+
+```python
+# Small files (<10MB)
+with open('small.txt', 'r') as f:
+    content = f.read()        # OK, load all
+
+# Large files (>10MB)
+with open('large.txt', 'r') as f:
+    for line in f:            # GOOD, process line by line
+        process(line)
+
+# Read in chunks (for binary or huge files)
+with open('huge.bin', 'rb') as f:
+    while True:
+        chunk = f.read(8192)  # Read 8KB at a time
+        if not chunk:
+            break
+        process(chunk)
+```
+
+## 5. Writing Files
+
+### **write() - Write String**
+```python
+with open('file.txt', 'w') as f:
+    f.write('Hello, World!')   # Returns bytes written
+    f.write('\n')              # Must add newline manually
+
+# write() doesn't add newline!
+with open('file.txt', 'w') as f:
+    f.write('Line 1')
+    f.write('Line 2')          # Result: "Line 1Line 2"
+
+# Add newlines
+with open('file.txt', 'w') as f:
+    f.write('Line 1\n')
+    f.write('Line 2\n')        # Result: "Line 1\nLine 2\n"
+```
+
+### **writelines() - Write List**
+```python
+lines = ['Line 1\n', 'Line 2\n', 'Line 3\n']
+
+with open('file.txt', 'w') as f:
+    f.writelines(lines)        # Writes all lines
+
+# writelines() doesn't add newlines!
+lines = ['Line 1', 'Line 2']
+with open('file.txt', 'w') as f:
+    f.writelines(lines)        # Result: "Line 1Line 2"
+
+# Add newlines manually
+with open('file.txt', 'w') as f:
+    f.writelines(line + '\n' for line in lines)
+```
+
+### **Append vs Write**
+```python
+# Write mode (w) - ERASES existing content
+with open('file.txt', 'w') as f:
+    f.write('New content')     # Deletes old content!
+
+# Append mode (a) - Adds to end
+with open('file.txt', 'a') as f:
+    f.write('New line\n')      # Keeps old content
+
+# Example
+# file.txt contains: "Hello"
+
+with open('file.txt', 'w') as f:
+    f.write('World')
+# Result: "World" (Hello is gone!)
+
+with open('file.txt', 'a') as f:
+    f.write('World')
+# Result: "HelloWorld" (appended)
+```
+
+## 6. File Position & Seeking
+
+### **tell() - Get Current Position**
+```python
+with open('file.txt', 'r') as f:
+    print(f.tell())            # 0 (start)
+    f.read(5)
+    print(f.tell())            # 5 (read 5 bytes)
+    f.read()
+    print(f.tell())            # EOF position
+```
+
+### **seek() - Move Position**
+```python
+# seek(offset, whence)
+# whence: 0 (start), 1 (current), 2 (end)
+
+with open('file.txt', 'r') as f:
+    f.seek(0)                  # Go to start
+    f.seek(5)                  # Go to byte 5
+    f.seek(0, 2)               # Go to end
+    f.seek(-5, 2)              # 5 bytes before end
+
+# Text mode only supports:
+# - seek(0) or seek(offset, 0)
+# - seek(0, 2) for end
+
+# Binary mode supports all:
+with open('file.bin', 'rb') as f:
+    f.seek(10, 1)              # Move 10 bytes forward
+    f.seek(-5, 1)              # Move 5 bytes back
+```
+
+### **Rewind File**
+```python
+with open('file.txt', 'r') as f:
+    content = f.read()
+    # Now at EOF
+    f.seek(0)                  # Back to start
+    content_again = f.read()   # Read again
+```
+
+## 7. File Object Methods
+
+```python
+# Reading
+f.read(size=-1)              # Read n bytes (all if -1)
+f.readline(size=-1)          # Read one line
+f.readlines()                # Read all lines as list
+
+# Writing
+f.write(string)              # Write string (returns bytes written)
+f.writelines(list)           # Write list of strings
+
+# Position
+f.tell()                     # Current position
+f.seek(offset, whence=0)     # Move to position
+
+# Buffer
+f.flush()                    # Force write buffer to disk
+
+# State
+f.closed                     # True if closed
+f.mode                       # File mode ('r', 'w', etc.)
+f.name                       # File name
+f.encoding                   # File encoding (text mode)
+
+# Close
+f.close()                    # Close file
+
+# Readable/Writable
+f.readable()                 # Can read?
+f.writable()                 # Can write?
+f.seekable()                 # Can seek?
+
+# Truncate
+f.truncate(size=None)        # Resize file
+
+# File descriptor
+f.fileno()                   # OS file descriptor (int)
+
+# Check if terminal
+f.isatty()                   # Is terminal device?
+```
+
+## 8. Binary Files
+
+### **Reading Binary**
+```python
+# Read image
+with open('image.png', 'rb') as f:
+    data = f.read()            # Returns bytes object
+
+# Read in chunks (large files)
+with open('large.bin', 'rb') as f:
+    while True:
+        chunk = f.read(8192)   # 8KB chunks
+        if not chunk:
+            break
+        process(chunk)
+
+# Byte operations
+with open('file.bin', 'rb') as f:
+    data = f.read(10)          # First 10 bytes
+    print(data)                # b'\x89PNG\r\n\x1a\n...'
+    print(data[0])             # 137 (first byte as int)
+    print(hex(data[0]))        # 0x89
+```
+
+### **Writing Binary**
+```python
+# Write bytes
+data = b'\x00\x01\x02\x03'
+with open('file.bin', 'wb') as f:
+    f.write(data)
+
+# Copy binary file
+with open('source.png', 'rb') as src:
+    with open('dest.png', 'wb') as dst:
+        dst.write(src.read())
+
+# Or copy in chunks (better for large files)
+with open('source.png', 'rb') as src:
+    with open('dest.png', 'wb') as dst:
+        while True:
+            chunk = src.read(8192)
+            if not chunk:
+                break
+            dst.write(chunk)
+
+# Using shutil (best for copying)
+import shutil
+shutil.copy('source.png', 'dest.png')
+```
+
+### **Binary vs Text**
+```python
+# Text mode
+with open('file.txt', 'r') as f:
+    data = f.read()            # Returns str
+    type(data)                 # <class 'str'>
+
+# Binary mode
+with open('file.txt', 'rb') as f:
+    data = f.read()            # Returns bytes
+    type(data)                 # <class 'bytes'>
+
+# Convert
+text = "Hello"
+binary = text.encode('utf-8')  # str → bytes
+text_again = binary.decode('utf-8')  # bytes → str
+```
+
+## 9. File Buffering
+
+### **What is Buffering?**
+```
+Program → Buffer (in memory) → Disk
+                ↑
+           Flush when full or close
+
+Why buffer?
+- Disk I/O is slow (microseconds vs nanoseconds)
+- Batching writes is more efficient
+- Reduces system calls
+```
+
+### **Buffer Modes**
+```python
+# Default buffering (good for most cases)
+f = open('file.txt', 'w')
+
+# No buffering (writes immediately)
+f = open('file.txt', 'w', buffering=0)  # Binary mode only
+
+# Line buffering (flush on newline)
+f = open('file.txt', 'w', buffering=1)  # Text mode only
+
+# Custom buffer size (bytes)
+f = open('file.txt', 'w', buffering=8192)  # 8KB buffer
+
+# Examples
+with open('file.txt', 'w', buffering=1) as f:
+    f.write('Line 1\n')        # Flushed immediately (line buffered)
+    f.write('No newline')      # Stays in buffer
+    f.flush()                  # Force flush
+
+# When to flush manually
+with open('log.txt', 'a') as f:
+    f.write('Important log entry\n')
+    f.flush()                  # Ensure written to disk NOW
+```
+
+### **Buffer Use Cases**
+```python
+# High-frequency writes (use default buffer)
+with open('output.txt', 'w') as f:
+    for i in range(10000):
+        f.write(f'{i}\n')      # Buffered, efficient
+
+# Critical logs (flush immediately)
+with open('critical.log', 'a', buffering=1) as f:
+    f.write(f'{timestamp}: Error\n')  # Flushed on \n
+
+# Real-time monitoring (no buffer)
+with open('monitor.log', 'wb', buffering=0) as f:
+    while True:
+        data = get_sensor_data()
+        f.write(data)          # Written immediately
+```
+
+## 10. Exception Handling
+
+### **Common File Exceptions**
+```python
+# FileNotFoundError - File doesn't exist
+try:
+    f = open('nonexistent.txt', 'r')
+except FileNotFoundError:
+    print("File not found!")
+
+# PermissionError - No permission to access
+try:
+    f = open('/root/file.txt', 'w')
+except PermissionError:
+    print("No permission!")
+
+# IsADirectoryError - Path is directory
+try:
+    f = open('/home/user', 'r')
+except IsADirectoryError:
+    print("That's a directory!")
+
+# FileExistsError - File exists (with 'x' mode)
+try:
+    f = open('existing.txt', 'x')
+except FileExistsError:
+    print("File already exists!")
+
+# UnicodeDecodeError - Encoding mismatch
+try:
+    with open('file.txt', 'r', encoding='ascii') as f:
+        content = f.read()
+except UnicodeDecodeError:
+    print("Encoding error!")
+
+# IOError / OSError - Generic I/O errors
+try:
+    f = open('file.txt', 'r')
+    content = f.read()
+except OSError as e:
+    print(f"I/O error: {e}")
+```
+
+### **Safe File Operations**
+```python
+# Check if file exists
+import os
+
+if os.path.exists('file.txt'):
+    with open('file.txt', 'r') as f:
+        content = f.read()
+
+# Check if path is file
+if os.path.isfile('file.txt'):
+    # It's a file
     pass
 
-# 'w' - MOST DANGEROUS (truncates immediately)
-with open('important.txt', 'w') as f:  # File is EMPTY now!
-    if should_cancel:  # Uh oh...
-        return  # Original content is GONE!
+# Check if path is directory
+if os.path.isdir('folder'):
+    # It's a directory
+    pass
 
-# 'a' - Safe for logs (append-only)
-with open('app.log', 'a') as f:
-    f.write('Log entry\n')  # Can't corrupt existing logs
-
-# 'x' - Safe for init (fails if exists)
+# Try to open with fallback
 try:
-    with open('config.json', 'x') as f:
-        f.write(default_config)
-except FileExistsError:
-    print("Config already exists, not overwriting")
+    with open('config.txt', 'r') as f:
+        config = f.read()
+except FileNotFoundError:
+    config = get_default_config()
 
-# 'r+' - For in-place updates
-with open('database.dat', 'r+b') as f:
-    f.seek(100)  # Go to byte 100
-    f.write(b'update')  # Overwrite 6 bytes
-    # Rest of file unchanged
+# Safe write (atomic-ish)
+import tempfile
+import shutil
+
+with tempfile.NamedTemporaryFile('w', delete=False) as tmp:
+    tmp.write(content)
+    tmp_name = tmp.name
+
+shutil.move(tmp_name, 'file.txt')  # Replace original
 ```
 
-## Part 2: Production Patterns & Architecture
+## 11. File Paths
 
-### 2.1 The Atomic Write Pattern: Preventing Corruption
-
-**Problem: Partial Writes Corrupt Data**
-```python
-# Scenario: Power failure mid-write
-with open('critical.json', 'w') as f:
-    f.write('{"user": "alice",')  # Power loss here!
-    # Result: Invalid JSON, data lost!
-
-# Or: Process killed mid-write
-with open('state.db', 'wb') as f:
-    f.write(serialized_data[:5000])  # Killed here!
-    # Result: Truncated database, corruption
-```
-
-**Solution: Atomic Rename (POSIX Guarantee)**
+### **Path Operations (os.path)**
 ```python
 import os
-import tempfile
+
+# Join paths (cross-platform)
+path = os.path.join('folder', 'subfolder', 'file.txt')
+# Linux: folder/subfolder/file.txt
+# Windows: folder\subfolder\file.txt
+
+# Get absolute path
+abs_path = os.path.abspath('file.txt')
+# /home/user/current/file.txt
+
+# Get directory and filename
+dir_name = os.path.dirname('/path/to/file.txt')   # /path/to
+file_name = os.path.basename('/path/to/file.txt') # file.txt
+
+# Split extension
+name, ext = os.path.splitext('file.txt')  # ('file', '.txt')
+
+# Check existence
+os.path.exists('file.txt')
+os.path.isfile('file.txt')
+os.path.isdir('folder')
+
+# Get file size
+size = os.path.getsize('file.txt')  # Bytes
+
+# Get modification time
+mtime = os.path.getmtime('file.txt')  # Timestamp
+
+# Current directory
+cwd = os.getcwd()
+
+# Change directory
+os.chdir('/path/to/folder')
+```
+
+### **pathlib (Modern Approach)**
+```python
+from pathlib import Path
+
+# Create path object
+p = Path('folder') / 'subfolder' / 'file.txt'
+# Path('folder/subfolder/file.txt')
+
+# Read/write directly
+p = Path('file.txt')
+content = p.read_text()           # Read file
+p.write_text('Hello')             # Write file
+
+# Read binary
+data = p.read_bytes()             # Read binary
+p.write_bytes(b'\x00\x01')        # Write binary
+
+# Check existence
+p.exists()                        # File exists?
+p.is_file()                       # Is file?
+p.is_dir()                        # Is directory?
+
+# File info
+p.stat().st_size                  # Size in bytes
+p.stat().st_mtime                 # Modification time
+p.suffix                          # '.txt'
+p.stem                            # 'file' (without extension)
+p.name                            # 'file.txt'
+p.parent                          # Path('folder/subfolder')
+
+# Create directory
+p = Path('new_folder')
+p.mkdir(exist_ok=True)            # Create if not exists
+p.mkdir(parents=True, exist_ok=True)  # Create parent dirs too
+
+# List files
+p = Path('.')
+for item in p.iterdir():
+    print(item)
+
+# Glob pattern matching
+for txt_file in p.glob('*.txt'):
+    print(txt_file)
+
+# Recursive glob
+for py_file in p.rglob('*.py'):   # All .py files recursively
+    print(py_file)
+
+# Delete file
+p = Path('file.txt')
+p.unlink()                        # Delete file
+p.unlink(missing_ok=True)         # No error if missing
+
+# Rename/move
+p.rename('new_name.txt')
+
+# Resolve (absolute path)
+p = Path('file.txt')
+abs_p = p.resolve()               # /home/user/current/file.txt
+```
+
+## 12. Working with CSV Files
+
+```python
+import csv
+
+# Read CSV
+with open('data.csv', 'r') as f:
+    reader = csv.reader(f)
+    for row in reader:
+        print(row)                # List: ['col1', 'col2', 'col3']
+
+# Read CSV as dict
+with open('data.csv', 'r') as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        print(row)                # Dict: {'name': 'Alice', 'age': '30'}
+        print(row['name'])        # Access by column name
+
+# Write CSV
+data = [
+    ['Name', 'Age', 'City'],
+    ['Alice', 30, 'NYC'],
+    ['Bob', 25, 'LA']
+]
+
+with open('output.csv', 'w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow(['Name', 'Age'])  # Single row
+    writer.writerows(data)            # Multiple rows
+
+# Write CSV from dict
+data = [
+    {'name': 'Alice', 'age': 30},
+    {'name': 'Bob', 'age': 25}
+]
+
+with open('output.csv', 'w', newline='') as f:
+    fieldnames = ['name', 'age']
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
+    writer.writeheader()              # Write header row
+    writer.writerows(data)
+
+# Custom delimiter
+with open('data.tsv', 'r') as f:
+    reader = csv.reader(f, delimiter='\t')
+
+# Handle quotes
+with open('data.csv', 'r') as f:
+    reader = csv.reader(f, quotechar='"', quoting=csv.QUOTE_MINIMAL)
+```
+
+## 13. Working with JSON Files
+
+```python
 import json
 
-def atomic_write(filename, content, mode='w', **kwargs):
-    """
-    Atomic write: writes complete or not at all
-    
-    How it works:
-    1. Write to temporary file (different name)
-    2. Flush and fsync (force to disk)
-    3. Rename temp → target (atomic on POSIX)
-    
-    Why atomic? rename() is single syscall:
-    - Either: old name → new name (success)
-    - Or: nothing changes (failure)
-    - Never: partial rename or corruption
-    """
-    dirname = os.path.dirname(os.path.abspath(filename))
-    basename = os.path.basename(filename)
-    
-    # Create temp file in SAME directory (same filesystem)
-    # Why same dir? rename() across filesystems isn't atomic!
-    fd, tmp_path = tempfile.mkstemp(
-        dir=dirname,
-        prefix=f'.{basename}.tmp.',
-        suffix='.tmp'
-    )
-    
-    try:
-        with os.fdopen(fd, mode, **kwargs) as f:
-            f.write(content)
-            f.flush()  # Flush Python buffer
-            os.fsync(f.fileno())  # Force OS to disk
-        
-        # Atomic rename
-        os.replace(tmp_path, filename)  # Python 3.3+
-        # replace() = atomic on POSIX, best-effort on Windows
-        
-    except:
-        # Cleanup on failure
-        try:
-            os.unlink(tmp_path)
-        except:
-            pass
-        raise
+# Read JSON
+with open('data.json', 'r') as f:
+    data = json.load(f)           # Returns dict/list
 
-# Usage in production:
-def save_config(config):
-    content = json.dumps(config, indent=2)
-    atomic_write('config.json', content)
-    # Guarantee: config.json is always valid or unchanged
+# Write JSON
+data = {'name': 'Alice', 'age': 30}
 
-# Use case: State persistence
-class StatefulService:
-    def save_state(self):
-        state = self.serialize()
-        atomic_write('service.state', state)
-    
-    def load_state(self):
-        try:
-            with open('service.state', 'r') as f:
-                return self.deserialize(f.read())
-        except FileNotFoundError:
-            return self.default_state()
+with open('output.json', 'w') as f:
+    json.dump(data, f)            # Write to file
+
+# Pretty print JSON
+with open('output.json', 'w') as f:
+    json.dump(data, f, indent=2)  # Indented output
+
+# Convert to/from string
+json_str = json.dumps(data)       # Dict → JSON string
+data = json.loads(json_str)       # JSON string → Dict
+
+# Handle custom objects
+class Person:
+    def __init__(self, name, age):
+        self.name = name
+        self.age = age
+
+def person_encoder(obj):
+    if isinstance(obj, Person):
+        return {'name': obj.name, 'age': obj.age}
+    raise TypeError
+
+person = Person('Alice', 30)
+json_str = json.dumps(person, default=person_encoder)
+
+# Or use dataclasses (Python 3.7+)
+from dataclasses import dataclass, asdict
+
+@dataclass
+class Person:
+    name: str
+    age: int
+
+person = Person('Alice', 30)
+json_str = json.dumps(asdict(person))
 ```
 
-**When Atomic Writes Matter:**
-- Configuration files (service won't start if corrupt)
-- Database checkpoints (partial write = corruption)
-- State persistence (must be consistent)
-- Critical logs (audit trails)
+## 14. Temporary Files
 
-**When NOT to Use:**
-- High-frequency writes (overhead of temp + rename)
-- Append-only logs (append is naturally atomic)
-- Temporary files (don't care about atomicity)
-
-### 2.2 File Locking: Coordinating Multiple Processes
-
-**The Problem: Race Conditions**
 ```python
-# Process A:                    # Process B:
-count = int(f.read())           count = int(f.read())  # Both read "5"
-count += 1                      count += 1
-f.write(str(count))  # "6"     f.write(str(count))  # "6" (should be 7!)
+import tempfile
 
-# Result: Lost update! Count is 6, not 7
+# Temporary file (auto-deleted)
+with tempfile.TemporaryFile('w+') as f:
+    f.write('Temporary data')
+    f.seek(0)
+    print(f.read())
+# File deleted automatically
+
+# Named temporary file
+with tempfile.NamedTemporaryFile('w', delete=False) as f:
+    f.write('Data')
+    temp_path = f.name
+# File exists after context (delete=False)
+
+# Temporary directory
+with tempfile.TemporaryDirectory() as tmpdir:
+    # tmpdir is a path string
+    file_path = os.path.join(tmpdir, 'file.txt')
+    with open(file_path, 'w') as f:
+        f.write('Data')
+# Directory and all contents deleted
+
+# Get temp directory
+temp_dir = tempfile.gettempdir()  # /tmp on Linux
+
+# Create temp file with suffix
+with tempfile.NamedTemporaryFile(suffix='.txt') as f:
+    print(f.name)                 # /tmp/tmp8x9y1z2a.txt
 ```
 
-**Solution: Advisory Locks (fcntl on Unix)**
+## 15. File Locking
+
 ```python
-import fcntl
-import time
+import fcntl  # Unix only
 
-# Exclusive lock (writer)
-with open('counter.txt', 'r+') as f:
-    fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Block until acquired
-    try:
-        count = int(f.read() or '0')
-        count += 1
-        f.seek(0)
-        f.write(str(count))
-        f.truncate()
-    finally:
-        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-# Shared lock (reader) - multiple readers allowed
-with open('config.txt', 'r') as f:
-    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-    config = f.read()
+# Exclusive lock (write)
+with open('file.txt', 'w') as f:
+    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    f.write('Critical section')
     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
-# Non-blocking lock (try, don't wait)
+# Shared lock (read)
+with open('file.txt', 'r') as f:
+    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+    content = f.read()
+    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+# Non-blocking lock
 try:
     fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-except BlockingIOError:
-    print("File is locked by another process")
+except IOError:
+    print("File is locked!")
 
-# Cross-platform solution: portalocker
+# Cross-platform locking (use portalocker)
+# pip install portalocker
 import portalocker
 
-with open('file.txt', 'r+') as f:
+with open('file.txt', 'w') as f:
     portalocker.lock(f, portalocker.LOCK_EX)
-    # Critical section
+    f.write('Data')
     portalocker.unlock(f)
 ```
 
-**Lock Types: Mental Model**
-```
-Shared (LOCK_SH):
-- Multiple processes can hold simultaneously
-- For reading
-- Blocks exclusive locks
+## 16. Memory-Mapped Files
 
-Exclusive (LOCK_EX):
-- Only one process can hold
-- For writing
-- Blocks all other locks
-
-Advisory vs Mandatory:
-- Advisory: Processes must cooperate (fcntl)
-- Mandatory: OS enforces (rare, Windows has better support)
-```
-
-**Production Pattern: Lockfile**
-```python
-import os
-import sys
-
-class LockFile:
-    """Ensure only one instance runs"""
-    def __init__(self, path='/tmp/myapp.lock'):
-        self.path = path
-        self.fd = None
-    
-    def __enter__(self):
-        self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR)
-        try:
-            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print("Another instance is running!")
-            sys.exit(1)
-        return self
-    
-    def __exit__(self, *args):
-        if self.fd:
-            fcntl.flock(self.fd, fcntl.LOCK_UN)
-            os.close(self.fd)
-            os.unlink(self.path)
-
-# Usage:
-with LockFile():
-    run_application()  # Guaranteed single instance
-```
-
-### 2.3 Memory-Mapped Files: Zero-Copy I/O
-
-**Concept: Map File Directly to Memory**
-```
-Normal I/O:
-Disk → OS buffer → read() → Python bytes → Process
-      (copy)        (copy)
-
-Memory-mapped:
-Disk → OS buffer ↔ Process memory
-      (direct mapping, no copy!)
-```
-
-**When to Use mmap:**
 ```python
 import mmap
 
-# ✓ Large files with random access
-with open('large_database.dat', 'r+b') as f:
-    mm = mmap.mmap(f.fileno(), 0)
+# Memory-map file (efficient for large files)
+with open('large.txt', 'r+b') as f:
+    mmapped = mmap.mmap(f.fileno(), 0)
     
-    # Random access (O(1), like array)
-    value = mm[1000000:1000100]  # Instant access to byte 1M
+    # Read
+    print(mmapped[0:10])          # First 10 bytes
     
-    # Search (very fast)
-    index = mm.find(b'pattern')
+    # Write
+    mmapped[0:5] = b'Hello'
     
-    # Modify in-place
-    mm[100:105] = b'HELLO'
+    # Search
+    index = mmapped.find(b'pattern')
     
-    mm.close()
+    # Close
+    mmapped.close()
 
-# ✓ Shared memory between processes
-# Process A:
-with open('shared.dat', 'w+b') as f:
-    f.write(b'\x00' * 1000)  # 1KB
-with open('shared.dat', 'r+b') as f:
-    mm = mmap.mmap(f.fileno(), 0)
-    mm[0:5] = b'HELLO'
+# Benefits:
+# - Fast random access
+# - Shared between processes
+# - OS handles caching
+# - Good for large files
 
-# Process B:
-with open('shared.dat', 'r+b') as f:
-    mm = mmap.mmap(f.fileno(), 0)
-    print(mm[0:5])  # b'HELLO' - sees changes!
-
-# ✗ Don't use for:
-# - Sequential reading (normal I/O is faster)
-# - Small files (overhead not worth it)
-# - Files that change size (must remap)
+# Use case: Database files, large logs
 ```
 
-**Real Use Case: Large CSV Processing**
+## 17. File Descriptors & Low-Level I/O
+
 ```python
-def find_in_huge_csv(filename, search_term):
-    """Find record in multi-GB CSV without loading into RAM"""
-    with open(filename, 'r+b') as f:
-        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-        
-        pos = 0
+import os
+
+# Open with file descriptor
+fd = os.open('file.txt', os.O_RDONLY)
+data = os.read(fd, 1024)          # Read 1024 bytes
+os.close(fd)
+
+# Write
+fd = os.open('file.txt', os.O_WRONLY | os.O_CREAT)
+os.write(fd, b'Hello')
+os.close(fd)
+
+# Flags
+os.O_RDONLY                       # Read only
+os.O_WRONLY                       # Write only
+os.O_RDWR                         # Read and write
+os.O_CREAT                        # Create if not exists
+os.O_TRUNC                        # Truncate to zero
+os.O_APPEND                       # Append mode
+os.O_EXCL                         # Fail if exists (with O_CREAT)
+
+# Get file descriptor from file object
+f = open('file.txt', 'r')
+fd = f.fileno()                   # Get underlying FD
+
+# Duplicate file descriptor
+fd2 = os.dup(fd)
+
+# Redirect (advanced)
+os.dup2(fd, 1)                    # Redirect stdout to file
+```
+
+## 18. Performance Optimization
+
+### **Large File Reading**
+```python
+# BAD (loads entire file)
+with open('huge.txt', 'r') as f:
+    content = f.read()            # May crash with MemoryError
+
+# GOOD (line by line)
+with open('huge.txt', 'r') as f:
+    for line in f:
+        process(line)
+
+# GOOD (chunks)
+with open('huge.bin', 'rb') as f:
+    while True:
+        chunk = f.read(8192)      # 8KB chunks
+        if not chunk:
+            break
+        process(chunk)
+
+# Using generator (memory efficient)
+def read_chunks(filename, chunk_size=8192):
+    with open(filename, 'rb') as f:
         while True:
-            pos = mm.find(search_term.encode(), pos)
-            if pos == -1:
+            chunk = f.read(chunk_size)
+            if not chunk:
                 break
-            
-            # Find line boundaries
-            line_start = mm.rfind(b'\n', 0, pos) + 1
-            line_end = mm.find(b'\n', pos)
-            
-            line = mm[line_start:line_end].decode()
-            yield line
-            
-            pos = line_end + 1
-        
-        mm.close()
+            yield chunk
 
-# Processes 10GB CSV without loading into RAM
+for chunk in read_chunks('huge.bin'):
+    process(chunk)
 ```
 
-### 2.4 Buffering Strategies: Deep Dive
-
-**The Three Buffer Layers:**
-```
-1. Python's TextIOWrapper buffer (8KB default)
-2. C stdio buffer (OS libc)
-3. OS page cache (kernel manages)
-4. Disk controller cache (hardware)
-```
-
-**Tuning Decision Tree:**
+### **Bulk Writing**
 ```python
-# High-frequency tiny writes (logs)
-# Problem: Overhead of many small writes
-# Solution: Line buffering
-f = open('app.log', 'a', buffering=1)  # Flush on \n
-f.write('Error\n')  # Immediately visible
+# BAD (many small writes)
+with open('output.txt', 'w') as f:
+    for i in range(10000):
+        f.write(f'{i}\n')         # 10000 write calls
 
-# Bulk sequential writes (exports)
-# Problem: Default buffer too small, many flushes
-# Solution: Large buffer
-f = open('export.dat', 'wb', buffering=1024*1024)  # 1MB
-for chunk in data:
-    f.write(chunk)
+# GOOD (batch writes)
+lines = [f'{i}\n' for i in range(10000)]
+with open('output.txt', 'w') as f:
+    f.writelines(lines)           # One write call
 
-# Critical data (financial transactions)
-# Problem: Data loss unacceptable
-# Solution: No buffering + fsync
-f = open('transactions.log', 'ab', buffering=0)
-f.write(record)
-os.fsync(f.fileno())  # Force to physical disk
-
-# Network filesystem (NFS/SMB)
-# Problem: Network latency >> disk latency
-# Solution: Aggressive buffering
-f = open('/mnt/nfs/file', 'w', buffering=10*1024*1024)  # 10MB
-
-# Database-style (mixed read/write)
-# Problem: Thrashing between read/write
-# Solution: Disable Python buffer, use OS page cache
-f = open('db.dat', 'r+b', buffering=0)  # Let OS handle it
+# BETTER (generator + writelines)
+with open('output.txt', 'w') as f:
+    f.writelines(f'{i}\n' for i in range(10000))
 ```
 
-**Flush Strategies:**
+### **Buffer Size Tuning**
 ```python
-# 1. Explicit flush (control timing)
-with open('log.txt', 'a') as f:
-    f.write('Critical event\n')
-    f.flush()  # Ensure written to OS NOW
-    # (OS may still delay disk write)
-
-# 2. fsync (force physical write)
-with open('critical.dat', 'ab') as f:
+# Default buffer (good for most)
+with open('file.txt', 'w') as f:
     f.write(data)
-    f.flush()  # Python buffer → OS
-    os.fsync(f.fileno())  # OS → disk (slow! ~5-10ms)
 
-# 3. No buffering (auto-flush every write)
-f = open('realtime.log', 'ab', buffering=0)
+# Larger buffer for bulk operations
+with open('large.txt', 'w', buffering=65536) as f:  # 64KB
+    for data in large_dataset:
+        f.write(data)
 
-# Performance comparison:
-# buffering=8192: 0.5s for 10K writes
-# buffering=1: 2s (flush on \n)
-# buffering=0: 50s (flush every write!)
-# buffering=0 + fsync: 100s (wait for disk!)
-```
-
-### 2.5 File Watching: Event-Driven I/O
-
-**Use Cases:**
-- Auto-reload config when changed
-- Live log monitoring
-- File sync services (Dropbox-like)
-- Build systems (watch source, rebuild)
-
-**Implementation: watchdog Library**
-```python
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+# Benchmark different buffer sizes
 import time
 
-class ConfigReloader(FileSystemEventHandler):
-    """Reload config when file changes"""
+sizes = [1024, 8192, 65536]
+for size in sizes:
+    start = time.time()
+    with open('test.txt', 'w', buffering=size) as f:
+        for i in range(100000):
+            f.write(f'{i}\n')
+    print(f'Buffer {size}: {time.time() - start:.2f}s')
+```
+
+## 19. Atomic File Operations
+
+```python
+import os
+import tempfile
+
+# Atomic write (write to temp, then rename)
+def atomic_write(filename, content):
+    # Write to temporary file
+    fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(filename))
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(content)
+        os.replace(temp_path, filename)  # Atomic on POSIX
+    except:
+        os.unlink(temp_path)
+        raise
+
+# Why atomic writes matter:
+# - Power failure during write
+# - Process crash during write
+# - Concurrent readers
+# Atomic replace prevents partial/corrupt files
+
+# Using context manager
+import contextlib
+
+@contextlib.contextmanager
+def atomic_file(filename, mode='w'):
+    fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(filename))
+    try:
+        with os.fdopen(fd, mode) as f:
+            yield f
+        os.replace(temp_path, filename)
+    except:
+        os.unlink(temp_path)
+        raise
+
+# Usage
+with atomic_file('config.json') as f:
+    json.dump(config, f)
+```
+
+## 20. File Compression
+
+### **gzip**
+```python
+import gzip
+
+# Write compressed
+with gzip.open('file.txt.gz', 'wt', encoding='utf-8') as f:
+    f.write('Hello, World!')
+
+# Read compressed
+with gzip.open('file.txt.gz', 'rt', encoding='utf-8') as f:
+    content = f.read()
+
+# Compress existing file
+with open('file.txt', 'rb') as f_in:
+    with gzip.open('file.txt.gz', 'wb') as f_out:
+        f_out.writelines(f_in)
+
+# Or use shutil
+import shutil
+with open('file.txt', 'rb') as f_in:
+    with gzip.open('file.txt.gz', 'wb') as f_out:
+        shutil.copyfileobj(f_in, f_out)
+
+# Decompress
+with gzip.open('file.txt.gz', 'rb') as f_in:
+    with open('file.txt', 'wb') as f_out:
+        shutil.copyfileobj(f_in, f_out)
+```
+
+### **zipfile**
+```python
+import zipfile
+
+# Create zip
+with zipfile.ZipFile('archive.zip', 'w') as zf:
+    zf.write('file1.txt')
+    zf.write('file2.txt')
+    zf.write('folder/file3.txt', arcname='file3.txt')
+
+# Read zip
+with zipfile.ZipFile('archive.zip', 'r') as zf:
+    # List contents
+    for name in zf.namelist():
+        print(name)
     
-    def __init__(self, config_path, reload_func):
-        self.config_path = config_path
-        self.reload_func = reload_func
-        self.last_modified = 0
+    # Read file
+    content = zf.read('file1.txt')
+    
+    # Extract all
+    zf.extractall('destination_folder')
+    
+    # Extract specific file
+    zf.extract('file1.txt', 'destination_folder')
+
+# Add to existing zip
+with zipfile.ZipFile('archive.zip', 'a') as zf:
+    zf.write('new_file.txt')
+
+# Compress with different algorithm
+with zipfile.ZipFile('archive.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
+    zf.write('file.txt')
+
+# Password protected (write only)
+with zipfile.ZipFile('secure.zip', 'w') as zf:
+    zf.setpassword(b'password')
+    zf.write('secret.txt')
+```
+
+### **tarfile**
+```python
+import tarfile
+
+# Create tar.gz
+with tarfile.open('archive.tar.gz', 'w:gz') as tar:
+    tar.add('file1.txt')
+    tar.add('folder/', recursive=True)
+
+# Create tar (no compression)
+with tarfile.open('archive.tar', 'w') as tar:
+    tar.add('file.txt')
+
+# Create tar.bz2
+with tarfile.open('archive.tar.bz2', 'w:bz2') as tar:
+    tar.add('file.txt')
+
+# Read tar
+with tarfile.open('archive.tar.gz', 'r:gz') as tar:
+    # List contents
+    for member in tar.getmembers():
+        print(member.name)
+    
+    # Extract all
+    tar.extractall('destination')
+    
+    # Extract specific file
+    tar.extract('file.txt', 'destination')
+    
+    # Read file content
+    f = tar.extractfile('file.txt')
+    content = f.read()
+```
+
+## 21. File Watching
+
+```python
+# Using watchdog library
+# pip install watchdog
+
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+class MyHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        print(f'Created: {event.src_path}')
     
     def on_modified(self, event):
-        if event.src_path.endswith(self.config_path):
-            # Debounce (editors trigger multiple events)
-            now = time.time()
-            if now - self.last_modified < 1:
-                return
-            self.last_modified = now
-            
-            print(f"Config changed, reloading...")
-            try:
-                self.reload_func()
-            except Exception as e:
-                print(f"Reload failed: {e}")
+        print(f'Modified: {event.src_path}')
+    
+    def on_deleted(self, event):
+        print(f'Deleted: {event.src_path}')
+    
+    def on_moved(self, event):
+        print(f'Moved: {event.src_path} -> {event.dest_path}')
 
-# Usage:
-def reload_config():
-    global config
-    with open('app.config', 'r') as f:
-        config = json.load(f)
-    print(f"Config reloaded: {config}")
-
+# Watch directory
 observer = Observer()
-handler = ConfigReloader('app.config', reload_config)
-observer.schedule(handler, path='.', recursive=False)
+observer.schedule(MyHandler(), path='watched_folder', recursive=True)
 observer.start()
 
-# App runs with live config reload
 try:
     while True:
         time.sleep(1)
 except KeyboardInterrupt:
     observer.stop()
+
 observer.join()
+
+# Use case: Auto-reload config, log monitoring, file sync
 ```
 
-**Lower-Level: inotify (Linux)**
+## 22. Stdin/Stdout/Stderr
+
 ```python
-# Using pyinotify (Linux only, kernel integration)
-import pyinotify
+import sys
 
-class EventHandler(pyinotify.ProcessEvent):
-    def process_IN_MODIFY(self, event):
-        print(f"Modified: {event.pathname}")
-    
-    def process_IN_CREATE(self, event):
-        print(f"Created: {event.pathname}")
+# Read from stdin
+line = sys.stdin.readline()       # One line
+lines = sys.stdin.readlines()     # All lines
 
-wm = pyinotify.WatchManager()
-handler = EventHandler()
-notifier = pyinotify.Notifier(wm, handler)
+# Iterate stdin (pipe-friendly)
+for line in sys.stdin:
+    process(line.strip())
 
-# Watch directory
-wm.add_watch('/path/to/watch', pyinotify.IN_MODIFY | pyinotify.IN_CREATE)
+# Write to stdout
+sys.stdout.write('Hello\n')
+print('Hello')                    # Same as above
 
-notifier.loop()
+# Write to stderr
+sys.stderr.write('Error!\n')
+print('Error!', file=sys.stderr)  # Same as above
 
-# Advantage over polling:
-# - Kernel notifies on change (zero CPU when idle)
-# - Instant notification (no poll interval delay)
-# - Scales to millions of files
+# Check if piped
+if not sys.stdin.isatty():
+    # Data is piped in
+    data = sys.stdin.read()
+
+if not sys.stdout.isatty():
+    # Output is piped/redirected
+    pass
+
+# Redirect stdout to file
+original_stdout = sys.stdout
+with open('output.txt', 'w') as f:
+    sys.stdout = f
+    print('This goes to file')
+sys.stdout = original_stdout
+
+# Context manager for redirection
+from contextlib import redirect_stdout, redirect_stderr
+
+with open('output.txt', 'w') as f:
+    with redirect_stdout(f):
+        print('To file')
+
+# Usage: python script.py < input.txt > output.txt 2> error.txt
 ```
 
-## Part 3: Advanced Libraries & Ecosystem
+## 23. File Permissions
 
-### 3.1 pathlib: Modern Path Handling
-
-**Why pathlib > os.path:**
 ```python
 import os
+import stat
+
+# Get permissions
+st = os.stat('file.txt')
+mode = st.st_mode
+
+# Check permissions
+is_readable = bool(mode & stat.S_IRUSR)
+is_writable = bool(mode & stat.S_IWUSR)
+is_executable = bool(mode & stat.S_IXUSR)
+
+# Set permissions (Unix)
+os.chmod('file.txt', 0o644)       # rw-r--r--
+os.chmod('file.txt', 0o755)       # rwxr-xr-x
+
+# Using stat constants
+os.chmod('file.txt', stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+
+# Change owner (Unix, requires privileges)
+os.chown('file.txt', uid, gid)
+
+# Get file info
+st = os.stat('file.txt')
+st.st_size                        # Size in bytes
+st.st_mtime                       # Last modified time
+st.st_atime                       # Last access time
+st.st_ctime                       # Creation time (Windows) / metadata change (Unix)
+st.st_uid                         # Owner user ID
+st.st_gid                         # Owner group ID
+
+# Using pathlib
+from pathlib import Path
+p = Path('file.txt')
+p.chmod(0o644)
+st = p.stat()
+```
+
+## 24. Directory Operations
+
+```python
+import os
+import shutil
 from pathlib import Path
 
-# Old way (os.path): string manipulation
-path = os.path.join('/home', 'user', 'docs', 'file.txt')
-dirname = os.path.dirname(path)
-basename = os.path.basename(path)
-exists = os.path.exists(path)
+# Create directory
+os.mkdir('new_folder')
+os.makedirs('parent/child/grandchild', exist_ok=True)
 
-# New way (pathlib): object-oriented
-path = Path('/home') / 'user' / 'docs' / 'file.txt'
-dirname = path.parent
-basename = path.name
-exists = path.exists()
+# Using pathlib
+Path('new_folder').mkdir(exist_ok=True)
+Path('parent/child').mkdir(parents=True, exist_ok=True)
 
-# Psychology: Path is a first-class object
-# - Immutable (safe to pass around)
-# - Chainable operations
-# - Cross-platform (/ works on Windows too!)
+# Remove directory
+os.rmdir('empty_folder')          # Only empty dirs
+shutil.rmtree('folder')           # Recursive delete
+
+Path('folder').rmdir()            # Only empty
+# No recursive delete in pathlib, use shutil
+
+# List directory
+entries = os.listdir('folder')    # Returns list of names
+
+# Better: scandir (returns DirEntry objects)
+with os.scandir('folder') as it:
+    for entry in it:
+        print(entry.name)
+        print(entry.is_file())
+        print(entry.is_dir())
+        print(entry.stat())
+
+# Using pathlib
+for item in Path('folder').iterdir():
+    print(item)
+    print(item.is_file())
+    print(item.is_dir())
+
+# Recursive listing
+for root, dirs, files in os.walk('folder'):
+    for file in files:
+        full_path = os.path.join(root, file)
+        print(full_path)
+
+# Using pathlib glob
+for py_file in Path('.').rglob('*.py'):
+    print(py_file)
+
+# Copy directory
+shutil.copytree('source', 'destination')
+
+# Copy with overwrite (Python 3.8+)
+shutil.copytree('source', 'dest', dirs_exist_ok=True)
+
+# Move/rename directory
+shutil.move('old_name', 'new_name')
+
+# Current directory
+cwd = os.getcwd()
+cwd = Path.cwd()
+
+# Change directory
+os.chdir('folder')
+
+# Home directory
+home = Path.home()                # /home/user
 ```
 
-**Real Project Usage:**
+## 25. File System Operations
+
 ```python
-from pathlib import Path
+import os
+import shutil
 
-class ProjectStructure:
-    """Manage project paths centrally"""
-    
-    def __init__(self, root):
-        self.root = Path(root)
-        
-        # Define structure
-        self.data = self.root / 'data'
-        self.logs = self.root / 'logs'
-        self.cache = self.root / 'cache'
-        self.config = self.root / 'config' / 'app.yaml'
-    
-    def ensure_dirs(self):
-        """Create directories if missing"""
-        for dir_path in [self.data, self.logs, self.cache]:
-            dir_path.mkdir(parents=True, exist_ok=True)
-    
-    def list_data_files(self, pattern='*.csv'):
-        """Find all CSVs in data directory"""
-        return list(self.data.glob(pattern))
-    
-    def get_log_file(self, name):
-        """Get timestamped log file"""
-        from datetime import datetime
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        return self.logs / f'{name}_{timestamp}.log'
+# Copy file
+shutil.copy('source.txt', 'dest.txt')           # Copy file
+shutil.copy2('source.txt', 'dest.txt')          # Copy with metadata
+shutil.copyfile('source.txt', 'dest.txt')       # Copy content only
 
-# Usage:
-project = ProjectStructure('/opt/myapp')
-project.ensure_dirs()
+# Move/rename file
+shutil.move('old.txt', 'new.txt')
+os.rename('old.txt', 'new.txt')
 
-# Read config
-config = yaml.safe_load(project.config.read_text())
+# Delete file
+os.remove('file.txt')
+os.unlink('file.txt')                           # Same as remove
+Path('file.txt').unlink(missing_ok=True)
 
-# Process all CSVs
-for csv_file in project.list_data_files():
-    process(csv_file)
+# Check before delete
+if os.path.exists('file.txt'):
+    os.remove('file.txt')
 
-# Create log
-log_file = project.get_log_file('import')
-log_file.write_text('Import complete\n')
+# Get disk usage
+total, used, free = shutil.disk_usage('/')
+print(f'Total: {total // (2**30)} GB')
+print(f'Used: {used // (2**30)} GB')
+print(f'Free: {free // (2**30)} GB')
+
+# File links (Unix)
+os.symlink('target.txt', 'link.txt')            # Symbolic link
+os.link('target.txt', 'hard_link.txt')          # Hard link
+
+# Check if link
+os.path.islink('link.txt')
+Path('link.txt').is_symlink()
+
+# Read link target
+os.readlink('link.txt')
+Path('link.txt').readlink()
+
+# Resolve link to real path
+os.path.realpath('link.txt')
+Path('link.txt').resolve()
 ```
 
-**Advanced pathlib Patterns:**
+## 26. Context Managers
+
+### **Multiple Files**
 ```python
-# Recursive search
-def find_python_files(root):
-    """Find all .py files recursively"""
-    return Path(root).rglob('*.py')
+# Multiple with statements
+with open('input.txt', 'r') as f_in:
+    with open('output.txt', 'w') as f_out:
+        content = f_in.read()
+        f_out.write(content)
 
-# Multiple patterns
-def find_source_files(root):
-    """Find all source files"""
-    root = Path(root)
-    patterns = ['*.py', '*.js', '*.java']
-    for pattern in patterns:
-        yield from root.rglob(pattern)
+# Single statement (Python 2.7+)
+with open('input.txt', 'r') as f_in, open('output.txt', 'w') as f_out:
+    content = f_in.read()
+    f_out.write(content)
 
-# Filter by date
-from datetime import datetime, timedelta
+# ExitStack for dynamic number of files
+from contextlib import ExitStack
 
-def find_recent_logs(log_dir, days=7):
-    """Find logs modified in last N days"""
-    cutoff = datetime.now() - timedelta(days=days)
-    log_path = Path(log_dir)
-    
-    for log_file in log_path.glob('*.log'):
-        mtime = datetime.fromtimestamp(log_file.stat().st_mtime)
-        if mtime > cutoff:
-            yield log_file
-
-# Atomic operations
-def safe_write_json(path, data):
-    """Write JSON atomically using pathlib"""
-    path = Path(path)
-    temp = path.with_suffix('.tmp')
-    
-    temp.write_text(json.dumps(data, indent=2))
-    temp.replace(path)  # Atomic on POSIX
+with ExitStack() as stack:
+    files = [stack.enter_context(open(f'file{i}.txt', 'r')) 
+             for i in range(10)]
+    # All files auto-close
 ```
 
-### 3.2 CSV Handling: pandas vs csv Module
-
-**When to Use Each:**
+### **Custom Context Manager**
 ```python
-# csv module: Small files, streaming, low memory
-import csv
-
-# Good for: Line-by-line processing
-with open('data.csv', 'r') as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-        process(row)  # Memory: O(1) per row
-
-# pandas: Analysis, transformations, medium files
-import pandas as pd
-
-# Good for: Bulk operations, complex queries
-df = pd.read_csv('data.csv')  # Memory: O(n)
-result = df[df['age'] > 30].groupby('city').mean()
-```
-
-**Production CSV Handling:**
-```python
-import csv
-from typing import Iterator, Dict
-
-def process_large_csv(
-    filename: str,
-    chunk_size: int = 10000
-) -> Iterator[Dict]:
-    """
-    Process CSV in chunks (memory-efficient)
+# Using class
+class FileManager:
+    def __init__(self, filename, mode):
+        self.filename = filename
+        self.mode = mode
+        self.file = None
     
-    Use case: 10GB CSV, 8GB RAM
-    """
-    with open(filename, 'r', newline='', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        
-        chunk = []
-        for row in reader:
-            chunk.append(row)
-            
-            if len(chunk) >= chunk_size:
-                yield chunk
-                chunk = []
-        
-        if chunk:
-            yield chunk
-
-# Usage:
-for chunk in process_large_csv('huge.csv'):
-    # Process 10K rows at a time
-    batch_insert_to_db(chunk)
-
-# Error handling
-def robust_csv_read(filename):
-    """Handle malformed CSV gracefully"""
-    errors = []
+    def __enter__(self):
+        self.file = open(self.filename, self.mode)
+        return self.file
     
-    with open(filename, 'r', newline='') as f:
-        reader = csv.DictReader(f)
-        
-        for line_num, row in enumerate(reader, start=2):  # Line 1 is header
-            try:
-                # Validate row
-                yield validate_and_clean(row)
-            except ValueError as e:
-                errors.append(f"Line {line_num}: {e}")
-                continue
-    
-    if errors:
-        with open('errors.log', 'w') as f:
-            f.write('\n'.join(errors))
-
-# Writing with progress
-def export_to_csv(data_iterator, filename, total=None):
-    """Export with progress tracking"""
-    import sys
-    
-    with open(filename, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['id', 'name', 'value'])
-        writer.writeheader()
-        
-        for i, row in enumerate(data_iterator):
-            writer.writerow(row)
-            
-            if i % 1000 == 0:
-                if total:
-                    pct = (i / total) * 100
-                    print(f'\rProgress: {pct:.1f}%', end='', file=sys.stderr)
-                else:
-                    print(f'\rProcessed: {i}', end='', file=sys.stderr)
-        
-        print('\nDone!', file=sys.stderr)
-```
-
-### 3.3 JSON Handling: Beyond Basic Load/Dump
-
-**Production JSON Patterns:**
-```python
-import json
-from decimal import Decimal
-from datetime import datetime, date
-from pathlib import Path
-
-class EnhancedJSONEncoder(json.JSONEncoder):
-    """Handle custom types in JSON"""
-    
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            return float(obj)
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()
-        if isinstance(obj, Path):
-            return str(obj)
-        if hasattr(obj, '__dict__'):
-            return obj.__dict__
-        return super().default(obj)
-
-# Usage:
-data = {
-    'price': Decimal('19.99'),
-    'created': datetime.now(),
-    'path': Path('/tmp/file.txt')
-}
-
-json_str = json.dumps(data, cls=EnhancedJSONEncoder)
-
-# Streaming large JSON arrays (memory-efficient)
-import ijson  # pip install ijson
-
-def process_large_json_array(filename):
-    """
-    Process JSON array without loading entire file
-    
-    File: [{"id": 1}, {"id": 2}, ...]
-    Memory: O(1) not O(n)
-    """
-    with open(filename, 'rb') as f:
-        # Parse incrementally
-        objects = ijson.items(f, 'item')
-        for obj in objects:
-            process(obj)
-
-# Pretty printing with custom format
-def pretty_json(data, filename):
-    """Human-readable JSON with sorted keys"""
-    with open(filename, 'w') as f:
-        json.dump(
-            data, 
-            f,
-            indent=2,
-            sort_keys=True,
-            ensure_ascii=False  # Keep Unicode as-is
-        )
-
-# Handling corrupted JSON
-def safe_json_load(filename):
-    """Try to recover from corrupted JSON"""
-    try:
-        with open(filename, 'r') as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
-        print(f"JSON error at line {e.lineno}, col {e.colno}")
-        print(f"Error: {e.msg}")
-        
-        # Attempt recovery: load valid prefix
-        with open(filename, 'r') as f:
-            content = f.read()
-            # Try parsing up to error position
-            valid_part = content[:e.pos]
-            # Add closing brackets/braces
-            return try_fix_json(valid_part)
-
-# Schema validation
-import jsonschema  # pip install jsonschema
-
-schema = {
-    "type": "object",
-    "properties": {
-        "name": {"type": "string"},
-        "age": {"type": "integer", "minimum": 0}
-    },
-    "required": ["name", "age"]
-}
-
-def validate_json_file(filename, schema):
-    """Validate JSON against schema"""
-    with open(filename, 'r') as f:
-        data = json.load(f)
-    
-    try:
-        jsonschema.validate(data, schema)
-        return True
-    except jsonschema.ValidationError as e:
-        print(f"Validation error: {e.message}")
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.file:
+            self.file.close()
+        # Return True to suppress exceptions
         return False
-```
 
-### 3.4 Binary File Formats: struct Module
+with FileManager('file.txt', 'r') as f:
+    content = f.read()
 
-**Concept: Reading/Writing Binary Data Structures**
-```python
-import struct
+# Using contextlib
+from contextlib import contextmanager
 
-# Pack data into binary format
-data = struct.pack(
-    'I 10s f',  # Format: unsigned int, 10-byte string, float
-    42,         # Integer
-    b'Hello',   # String (padded to 10 bytes)
-    3.14        # Float
-)
-# Result: b'*\x00\x00\x00Hello\x00\x00\x00\x00\x00\xc3\xf5H@'
-
-with open('data.bin', 'wb') as f:
-    f.write(data)
-
-# Unpack from binary
-with open('data.bin', 'rb') as f:
-    data = f.read()
-
-number, text, value = struct.unpack('I 10s f', data)
-# number=42, text=b'Hello\x00\x00\x00\x00\x00', value=3.14
-
-# Real use case: Reading image headers
-def read_png_header(filename):
-    """Read PNG file dimensions"""
-    with open(filename, 'rb') as f:
-        # PNG signature
-        signature = f.read(8)
-        if signature != b'\x89PNG\r\n\x1a\n':
-            raise ValueError("Not a PNG file")
-        
-        # IHDR chunk
-        length, = struct.unpack('>I', f.read(4))  # Big-endian
-        chunk_type = f.read(4)  # b'IHDR'
-        
-        # Dimensions
-        width, height = struct.unpack('>II', f.read(8))
-        
-        return {'width': width, 'height': height}
-
-# Custom binary protocol
-class BinaryMessage:
-    """Simple binary message format"""
-    
-    HEADER = b'MSG\x00'  # Magic bytes
-    FORMAT = '4s I H H'  # Header, length, msg_type, flags
-    HEADER_SIZE = struct.calcsize(FORMAT)
-    
-    def __init__(self, msg_type, data, flags=0):
-        self.msg_type = msg_type
-        self.data = data
-        self.flags = flags
-    
-    def serialize(self):
-        """Convert to binary"""
-        return struct.pack(
-            self.FORMAT,
-            self.HEADER,
-            len(self.data),
-            self.msg_type,
-            self.flags
-        ) + self.data
-    
-    @classmethod
-    def deserialize(cls, binary):
-        """Parse from binary"""
-        header, length, msg_type, flags = struct.unpack(
-            cls.FORMAT,
-            binary[:cls.HEADER_SIZE]
-        )
-        
-        if header != cls.HEADER:
-            raise ValueError("Invalid message header")
-        
-        data = binary[cls.HEADER_SIZE:cls.HEADER_SIZE + length]
-        return cls(msg_type, data, flags)
-
-# Usage: Custom protocol
-msg = BinaryMessage(msg_type=1, data=b'Hello, World!')
-binary = msg.serialize()
-
-with open('message.bin', 'wb') as f:
-    f.write(binary)
-
-with open('message.bin', 'rb') as f:
-    binary = f.read()
-    msg = BinaryMessage.deserialize(binary)
-    print(f"Type: {msg.msg_type}, Data: {msg.data}")
-```
-
-### 3.5 Compression: Strategy & Performance
-
-**Compression Decision Matrix:**
-```
-Algorithm | Ratio | Speed | Use Case
-----------|-------|-------|----------
-gzip      | 2-10x | Fast  | Web, logs, general
-bzip2     | 3-15x | Slow  | Archives, backups
-lzma/xz   | 4-20x | Slower| Maximum compression
-zstd      | 2-10x | Fastest| Real-time, databases
-lz4       | 1.5-3x| Very Fast| Temp files, cache
-
-Choose based on:
-- gzip: Default choice (good balance)
-- bzip2: Archival (better compression, slower)
-- lzma: Maximum compression (very slow)
-- zstd: Production systems (fast + good ratio)
-- lz4: Speed critical (caching, temp data)
-```
-
-**Production Compression Patterns:**
-```python
-import gzip
-import bz2
-import lzma
-import zstandard as zstd  # pip install zstandard
-
-def compress_log_rotation(log_file):
-    """
-    Compress rotated logs (common pattern)
-    
-    app.log      <- Active (uncompressed)
-    app.log.1.gz <- Yesterday (compressed)
-    app.log.2.gz <- 2 days ago
-    """
-    # Rotate existing logs
-    for i in range(6, 0, -1):
-        old = f'{log_file}.{i}.gz'
-        new = f'{log_file}.{i+1}.gz'
-        if os.path.exists(old):
-            os.rename(old, new)
-    
-    # Compress current log
-    if os.path.exists(log_file):
-        with open(log_file, 'rb') as f_in:
-            with gzip.open(f'{log_file}.1.gz', 'wb', compresslevel=6) as f_out:
-                shutil.copyfileobj(f_in, f_out)
-        
-        # Clear current log (or delete)
-        open(log_file, 'w').close()
-
-# Transparent compression (automatic based on extension)
-import contextlib
-
-@contextlib.contextmanager
-def smart_open(filename, mode='r', **kwargs):
-    """
-    Open file with automatic compression
-    
-    auto.txt    → open()
-    auto.gz     → gzip.open()
-    auto.bz2    → bz2.open()
-    auto.xz     → lzma.open()
-    """
-    if filename.endswith('.gz'):
-        f = gzip.open(filename, mode, **kwargs)
-    elif filename.endswith('.bz2'):
-        f = bz2.open(filename, mode, **kwargs)
-    elif filename.endswith('.xz'):
-        f = lzma.open(filename, mode, **kwargs)
-    else:
-        f = open(filename, mode, **kwargs)
-    
+@contextmanager
+def file_manager(filename, mode):
+    f = open(filename, mode)
     try:
         yield f
     finally:
         f.close()
 
-# Usage: Same code for compressed/uncompressed
-with smart_open('data.txt.gz', 'rt') as f:
+with file_manager('file.txt', 'r') as f:
+    content = f.read()
+```
+
+## 27. Edge Cases & Gotchas
+
+### **Newline Handling**
+```python
+# Windows: \r\n (CRLF)
+# Unix/Mac: \n (LF)
+# Old Mac: \r (CR)
+
+# Text mode auto-converts
+with open('file.txt', 'r') as f:      # Auto-converts \r\n to \n
     content = f.read()
 
-# Streaming compression (memory-efficient)
-def compress_stream(input_file, output_file):
-    """Compress large file without loading into RAM"""
-    with open(input_file, 'rb') as f_in:
-        with gzip.open(output_file, 'wb', compresslevel=6) as f_out:
-            while True:
-                chunk = f_in.read(65536)  # 64KB chunks
-                if not chunk:
-                    break
-                f_out.write(chunk)
+# Binary mode preserves
+with open('file.txt', 'rb') as f:     # Keeps original \r\n
+    content = f.read()
 
-# Parallel compression (faster for large files)
-import concurrent.futures
+# Disable newline translation
+with open('file.txt', 'r', newline='') as f:
+    content = f.read()                # Keeps \r\n in text mode
 
-def parallel_compress_chunks(input_file, output_file, num_workers=4):
-    """
-    Compress file in parallel chunks
-    
-    Split file → compress chunks in parallel → reassemble
-    """
-    import tempfile
-    
-    # Split into chunks
-    chunk_size = os.path.getsize(input_file) // num_workers
-    chunks = []
-    
-    with open(input_file, 'rb') as f:
-        for i in range(num_workers):
-            chunk = f.read(chunk_size)
-            if not chunk:
-                break
-            
-            # Compress chunk
-            temp = tempfile.NamedTemporaryFile(delete=False)
-            temp.close()
-            chunks.append(temp.name)
-            
-            with open(temp.name, 'wb') as cf:
-                cf.write(gzip.compress(chunk))
-    
-    # Reassemble
-    with open(output_file, 'wb') as f_out:
-        for chunk_file in chunks:
-            with open(chunk_file, 'rb') as cf:
-                f_out.write(cf.read())
-            os.unlink(chunk_file)
+# For CSV, use newline=''
+with open('data.csv', 'w', newline='') as f:
+    writer = csv.writer(f)
 ```
 
-### 3.6 Pickle: Python Object Serialization
-
-**When to Use Pickle:**
-```
-✓ Use pickle when:
-  - Python-to-Python communication
-  - Caching computed results
-  - Checkpointing ML models
-  - Inter-process data sharing
-
-✗ Don't use pickle when:
-  - Cross-language (use JSON, Protocol Buffers)
-  - Untrusted data (security risk!)
-  - Long-term storage (version fragile)
-  - Human-readable needed
-```
-
-**Advanced Pickle Patterns:**
+### **Encoding Issues**
 ```python
-import pickle
-import pickletools
+# Problem: Wrong encoding
+with open('file.txt', 'r') as f:      # Uses system default
+    content = f.read()                # May fail with UnicodeDecodeError
 
-# Basic usage
-data = {'model': trained_model, 'metadata': {'accuracy': 0.95}}
+# Solution: Explicit encoding
+with open('file.txt', 'r', encoding='utf-8') as f:
+    content = f.read()
 
-with open('model.pkl', 'wb') as f:
-    pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+# Detect encoding (use chardet)
+# pip install chardet
+import chardet
 
-with open('model.pkl', 'rb') as f:
-    data = pickle.load(f)
+with open('file.txt', 'rb') as f:
+    raw = f.read()
+    result = chardet.detect(raw)
+    encoding = result['encoding']
 
-# Protocol versions:
-# 0: ASCII (backward compatible, large)
-# 1: Binary (old)
-# 2: Python 2.3+ (efficient for classes)
-# 3: Python 3.0+ (default in Python 3.0-3.7)
-# 4: Python 3.4+ (huge objects >4GB)
-# 5: Python 3.8+ (out-of-band data, faster)
+with open('file.txt', 'r', encoding=encoding) as f:
+    content = f.read()
 
-# Custom pickling
-class DatabaseConnection:
-    """Can't pickle actual connection, recreate on unpickle"""
-    
-    def __init__(self, host, port):
-        self.host = host
-        self.port = port
-        self.conn = self._connect()
-    
-    def _connect(self):
-        return create_connection(self.host, self.port)
-    
-    def __getstate__(self):
-        """Return state for pickling (exclude conn)"""
-        state = self.__dict__.copy()
-        del state['conn']
-        return state
-    
-    def __setstate__(self, state):
-        """Restore state from pickle"""
-        self.__dict__.update(state)
-        self.conn = self._connect()  # Recreate connection
-
-# Optimize pickle size
-def optimize_pickle(obj, filename):
-    """Compress pickle for storage"""
-    import gzip
-    
-    with gzip.open(filename, 'wb') as f:
-        pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-# Analyze pickle contents (debugging)
-def analyze_pickle(filename):
-    """See what's inside a pickle file"""
-    with open(filename, 'rb') as f:
-        pickletools.dis(f)  # Disassemble pickle opcodes
-
-# Safe pickle loading (untrusted data)
-import io
-
-class RestrictedUnpickler(pickle.Unpickler):
-    """Only allow safe types"""
-    
-    SAFE_CLASSES = {
-        ('builtins', 'dict'),
-        ('builtins', 'list'),
-        ('builtins', 'int'),
-        ('builtins', 'float'),
-        ('builtins', 'str'),
-    }
-    
-    def find_class(self, module, name):
-        if (module, name) not in self.SAFE_CLASSES:
-            raise pickle.UnpicklingError(
-                f"Unsafe class: {module}.{name}"
-            )
-        return super().find_class(module, name)
-
-def safe_loads(data):
-    """Load pickle from untrusted source"""
-    return RestrictedUnpickler(io.BytesIO(data)).load()
+# Handle errors
+with open('file.txt', 'r', encoding='utf-8', errors='replace') as f:
+    content = f.read()                # Replace bad chars with �
 ```
 
-### 3.7 HDF5: Scientific Data Storage
-
-**Concept: Hierarchical Data Format for Huge Datasets**
+### **File Already Open**
 ```python
-import h5py  # pip install h5py
-import numpy as np
+# Problem: File left open
+f = open('file.txt', 'r')
+content = f.read()
+# Forgot to close!
 
-# Why HDF5?
-# ✓ Efficient for arrays (chunked storage)
-# ✓ Partial I/O (don't load entire dataset)
-# ✓ Compression (built-in)
-# ✓ Metadata support
-# ✓ Concurrent read access
-# ✓ Cross-language (C, Python, MATLAB, R)
+# Open again in write mode
+# f2 = open('file.txt', 'w')        # May fail or corrupt on some systems
 
-# Create HDF5 file
-with h5py.File('data.h5', 'w') as f:
-    # Store dataset
-    f.create_dataset('measurements', data=np.random.rand(1000, 1000))
-    
-    # Store with compression
-    f.create_dataset(
-        'compressed',
-        data=np.random.rand(1000, 1000),
-        compression='gzip',
-        compression_opts=6
-    )
-    
-    # Chunked storage (efficient partial access)
-    f.create_dataset(
-        'chunked',
-        data=np.random.rand(10000, 10000),
-        chunks=(1000, 1000)  # Read/write in 1000x1000 blocks
-    )
-    
-    # Metadata
-    f['measurements'].attrs['units'] = 'meters'
-    f['measurements'].attrs['timestamp'] = datetime.now().isoformat()
+# Solution: Always use context manager
+with open('file.txt', 'r') as f:
+    content = f.read()
+# Auto-closed
 
-# Read HDF5 (partial access)
-with h5py.File('data.h5', 'r') as f:
-    # Access slice without loading all
-    subset = f['chunked'][0:100, 0:100]  # Only reads needed chunks!
-    
-    # Read metadata
-    units = f['measurements'].attrs['units']
-    
-    # List contents
-    print(list(f.keys()))
-
-# Real use case: ML training data
-def create_training_data(images, labels, output_file):
-    """Store ML dataset efficiently"""
-    with h5py.File(output_file, 'w') as f:
-        # Images (compressed)
-        f.create_dataset(
-            'images',
-            data=images,
-            compression='gzip',
-            chunks=True  # Auto-chunk
-        )
-        
-        # Labels (small, no compression)
-        f.create_dataset('labels', data=labels)
-        
-        # Metadata
-        f.attrs['num_samples'] = len(images)
-        f.attrs['image_shape'] = images.shape[1:]
-        f.attrs['created'] = datetime.now().isoformat()
-
-# Incremental writes (append mode)
-def append_to_hdf5(filename, new_data):
-    """Add data to existing HDF5 file"""
-    with h5py.File(filename, 'a') as f:  # 'a' = append
-        if 'data' in f:
-            # Resize and append
-            dataset = f['data']
-            old_size = dataset.shape[0]
-            new_size = old_size + len(new_data)
-            
-            dataset.resize(new_size, axis=0)
-            dataset[old_size:] = new_data
-        else:
-            # Create with resizable dimension
-            f.create_dataset(
-                'data',
-                data=new_data,
-                maxshape=(None, *new_data.shape[1:])  # Unlimited first dim
-            )
+# Check if file is closed
+print(f.closed)                       # True
 ```
 
-### 3.8 SQLite: Embedded Database
-
-**Why SQLite for File Operations:**
-```
-✓ Use SQLite when:
-  - Structured data queries
-  - Transactions needed
-  - Multiple tables/relationships
-  - Concurrent reads (single writer)
-  - Better than CSV/JSON for >100MB
-
-✗ Use flat files when:
-  - Simple sequential read/write
-  - Small data (<1MB)
-  - No queries needed
-  - Streaming data
-```
-
-**Production SQLite Patterns:**
+### **Race Conditions**
 ```python
-import sqlite3
-from contextlib import contextmanager
-
-@contextmanager
-def get_db(db_path, **kwargs):
-    """Connection pool pattern"""
-    conn = sqlite3.connect(db_path, **kwargs)
-    conn.row_factory = sqlite3.Row  # Dict-like rows
-    try:
-        yield conn
-        conn.commit()
-    except:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-# Usage
-with get_db('app.db') as conn:
-    cursor = conn.execute('SELECT * FROM users WHERE age > ?', (18,))
-    for row in cursor:
-        print(dict(row))
-
-# Performance tuning
-def optimize_sqlite(db_path):
-    """Configure SQLite for performance"""
-    conn = sqlite3.connect(db_path)
-    
-    # Disable synchronous (faster, less safe)
-    conn.execute('PRAGMA synchronous = OFF')
-    
-    # Increase cache size
-    conn.execute('PRAGMA cache_size = 10000')  # 10000 pages
-    
-    # Use WAL mode (better concurrency)
-    conn.execute('PRAGMA journal_mode = WAL')
-    
-    # Memory temp store
-    conn.execute('PRAGMA temp_store = MEMORY')
-    
-    conn.close()
-
-# Bulk insert pattern
-def bulk_insert(db_path, records):
-    """Efficient bulk insert"""
-    with get_db(db_path) as conn:
-        # Use transaction
-        conn.execute('BEGIN TRANSACTION')
-        
-        # Prepare statement once
-        cursor = conn.cursor()
-        cursor.executemany(
-            'INSERT INTO users (name, age) VALUES (?, ?)',
-            records
-        )
-        
-        conn.execute('COMMIT')
-
-# File as database
-class FileDatabase:
-    """Use SQLite to index large file"""
-    
-    def __init__(self, file_path):
-        self.file_path = file_path
-        self.db_path = f'{file_path}.index.db'
-        self._create_index()
-    
-    def _create_index(self):
-        """Create index of file offsets"""
-        with get_db(self.db_path) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS lines (
-                    id INTEGER PRIMARY KEY,
-                    offset INTEGER,
-                    length INTEGER,
-                    content TEXT
-                )
-            ''')
-            
-            # Index file
-            with open(self.file_path, 'r') as f:
-                offset = 0
-                for line_id, line in enumerate(f):
-                    length = len(line)
-                    conn.execute(
-                        'INSERT INTO lines VALUES (?, ?, ?, ?)',
-                        (line_id, offset, length, line.strip())
-                    )
-                    offset += length
-    
-    def get_line(self, line_id):
-        """Fast random access to any line"""
-        with get_db(self.db_path) as conn:
-            row = conn.execute(
-                'SELECT offset, length FROM lines WHERE id = ?',
-                (line_id,)
-            ).fetchone()
-            
-            if row:
-                with open(self.file_path, 'r') as f:
-                    f.seek(row['offset'])
-                    return f.read(row['length']).strip()
-    
-    def search(self, pattern):
-        """Full-text search"""
-        with get_db(self.db_path) as conn:
-            cursor = conn.execute(
-                'SELECT id, content FROM lines WHERE content LIKE ?',
-                (f'%{pattern}%',)
-            )
-            return [dict(row) for row in cursor]
-
-# Usage: Index 10GB log file for fast search
-db = FileDatabase('huge.log')
-line_1000 = db.get_line(1000)  # Instant, no scanning
-results = db.search('ERROR')   # Fast, uses index
-```
-
-### 3.9 tempfile: Secure Temporary Files
-
-**Why tempfile > manual temp files:**
-```python
-# BAD: Predictable names, race conditions, not cleaned up
-temp_path = '/tmp/myapp_temp.txt'
-with open(temp_path, 'w') as f:
-    f.write(data)
-# Security: Attacker can predict name, symlink attack
-# Reliability: Not cleaned up on crash
-
-# GOOD: Secure, unpredictable, auto-cleanup
-import tempfile
-
-with tempfile.NamedTemporaryFile('w', delete=True) as f:
-    f.write(data)
-    # Use f.name if need path
-# Auto-deleted on close
-
-# Patterns:
-
-# 1. Temp file for processing
-def process_with_temp(data):
-    with tempfile.NamedTemporaryFile('w+', suffix='.json') as tmp:
-        json.dump(data, tmp)
-        tmp.flush()
-        
-        # Pass to external tool
-        subprocess.run(['tool', tmp.name])
-        
-        # Read result
-        tmp.seek(0)
-        return json.load(tmp)
-
-# 2. Temp directory for batch
-def batch_process(items):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Process items, write to temp dir
-        for i, item in enumerate(items):
-            path = os.path.join(tmpdir, f'item_{i}.txt')
-            with open(path, 'w') as f:
-                f.write(process(item))
-        
-        # Zip all results
-        shutil.make_archive('results', 'zip', tmpdir)
-    # tmpdir auto-deleted with all contents
-
-# 3. Atomic write using temp
-def atomic_write_via_temp(filename, content):
-    """Most portable atomic write"""
-    dir_path = os.path.dirname(os.path.abspath(filename))
-    
-    with tempfile.NamedTemporaryFile(
-        'w',
-        dir=dir_path,  # Same filesystem
-        delete=False
-    ) as tmp:
-        tmp.write(content)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp_name = tmp.name
-    
-    # Atomic rename
-    os.replace(tmp_name, filename)
-
-# 4. Secure temp for sensitive data
-def process_secret(secret_data):
-    # Temp file only readable by current user
-    with tempfile.NamedTemporaryFile('w', mode=0o600) as tmp:
-        tmp.write(secret_data)
-        tmp.flush()
-        # Process...
-    # Securely deleted (overwritten on some systems)
-```
-
-## Part 4: Real-World Project Patterns
-
-### 4.1 Configuration Management
-
-**Multi-Environment Config Pattern:**
-```python
-from pathlib import Path
-import yaml
-import os
-
-class Config:
-    """
-    Load config with environment overrides
-    
-    Priority (high to low):
-    1. Environment variables
-    2. Environment-specific file (config.prod.yaml)
-    3. Base config file (config.yaml)
-    4. Defaults
-    """
-    
-    def __init__(self, base_path='config'):
-        self.base_path = Path(base_path)
-        self.env = os.getenv('APP_ENV', 'dev')
-        self._load()
-    
-    def _load(self):
-        # Start with defaults
-        self.data = self._defaults()
-        
-        # Load base config
-        base_file = self.base_path / 'config.yaml'
-        if base_file.exists():
-            with base_file.open() as f:
-                self.data.update(yaml.safe_load(f))
-        
-        # Load environment-specific
-        env_file = self.base_path / f'config.{self.env}.yaml'
-        if env_file.exists():
-            with env_file.open() as f:
-                self.data.update(yaml.safe_load(f))
-        
-        # Environment variables override all
-        self._apply_env_overrides()
-    
-    def _defaults(self):
-        return {
-            'database': {
-                'host': 'localhost',
-                'port': 5432
-            },
-            'logging': {
-                'level': 'INFO'
-            }
-        }
-    
-    def _apply_env_overrides(self):
-        # APP_DATABASE_HOST overrides database.host
-        for key, value in os.environ.items():
-            if key.startswith('APP_'):
-                parts = key[4:].lower().split('_')
-                self._set_nested(self.data, parts, value)
-    
-    def _set_nested(self, d, keys, value):
-        for key in keys[:-1]:
-            d = d.setdefault(key, {})
-        d[keys[-1]] = value
-    
-    def get(self, path, default=None):
-        """Get nested config: config.get('database.host')"""
-        keys = path.split('.')
-        value = self.data
-        for key in keys:
-            if isinstance(value, dict):
-                value = value.get(key)
-            else:
-                return default
-        return value if value is not None else default
-
-# Usage:
-config = Config()
-db_host = config.get('database.host')  # From file or env
-```
-
-### 4.2 Logging Architecture
-
-**Production Logging Setup:**
-```python
-import logging
-import logging.handlers
-from pathlib import Path
-
-def setup_logging(app_name, log_dir='logs', level=logging.INFO):
-    """
-    Configure structured logging
-    
-    Features:
-    - Rotating files (avoid huge logs)
-    - Separate error log
-    - JSON format for parsing
-    - Console output for dev
-    """
-    log_path = Path(log_dir)
-    log_path.mkdir(exist_ok=True)
-    
-    # Root logger
-    logger = logging.getLogger(app_name)
-    logger.setLevel(level)
-    
-    # Format
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Console handler (dev)
-    if os.getenv('APP_ENV') == 'dev':
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        logger.addHandler(console)
-    
-    # Rotating file handler (all logs)
-    all_logs = logging.handlers.RotatingFileHandler(
-        log_path / f'{app_name}.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
-    )
-    all_logs.setFormatter(formatter)
-    logger.addHandler(all_logs)
-    
-    # Separate error log
-    error_logs = logging.handlers.RotatingFileHandler(
-        log_path / f'{app_name}.error.log',
-        maxBytes=10*1024*1024,
-        backupCount=5
-    )
-    error_logs.setLevel(logging.ERROR)
-    error_logs.setFormatter(formatter)
-    logger.addHandler(error_logs)
-    
-    # Timed rotation (daily logs)
-    daily_logs = logging.handlers.TimedRotatingFileHandler(
-        log_path / f'{app_name}.daily.log',
-        when='midnight',
-        interval=1,
-        backupCount=30  # Keep 30 days
-    )
-    daily_logs.setFormatter(formatter)
-    logger.addHandler(daily_logs)
-    
-    return logger
-
-# Usage:
-logger = setup_logging('myapp')
-logger.info('Application started')
-logger.error('Database connection failed', exc_info=True)
-```
-
-### 4.3 Data Pipeline Pattern
-
-**ETL (Extract, Transform, Load) with Files:**
-```python
-from typing import Iterator
-import csv
-from dataclasses import dataclass
-from datetime import datetime
-
-@dataclass
-class Record:
-    id: int
-    timestamp: datetime
-    value: float
-
-class DataPipeline:
-    """
-    Stream processing pipeline (memory-efficient)
-    
-    Extract → Transform → Load
-    Process millions of rows without loading all
-    """
-    
-    def __init__(self, input_file, output_file, error_file):
-        self.input_file = input_file
-        self.output_file = output_file
-        self.error_file = error_file
-        self.stats = {'processed': 0, 'errors': 0}
-    
-    def extract(self) -> Iterator[dict]:
-        """Read input file"""
-        with open(self.input_file, 'r') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-```
-
-
-
-
-## Complete Reference Section (Continued)
-
-### All File Object Attributes & Methods
-
-```python
-# File Object Attributes
-f.closed               # Boolean: Is file closed?
-f.mode                 # String: File mode ('r', 'w', etc.)
-f.name                 # String: File name
-f.encoding             # String: Encoding (text mode only)
-f.errors               # String: Error handling mode
-f.newlines             # Tuple/String: Newline types encountered
-f.buffer               # BufferedReader/Writer (text mode)
-
-# All File Methods (Complete List)
-f.read(size=-1)        # Read up to size bytes/chars
-f.read1(size=-1)       # Read at most one buffer (binary)
-f.readline(size=-1)    # Read one line
-f.readlines(hint=-1)   # Read all lines
-f.readinto(buffer)     # Read into pre-allocated buffer
-f.readinto1(buffer)    # Read at most one buffer
-
-f.write(data)          # Write string/bytes
-f.writelines(lines)    # Write sequence of strings/bytes
-
-f.seek(offset, whence=0) # Move file position
-f.tell()               # Return current position
-f.truncate(size=None)  # Resize file
-
-f.flush()              # Flush write buffer to OS
-f.close()              # Close file
-f.fileno()             # Return file descriptor (int)
-
-f.readable()           # Can file be read?
-f.writable()           # Can file be written?
-f.seekable()           # Can file be seeked?
-f.isatty()             # Is file a terminal device?
-
-# Context manager methods
-f.__enter__()          # Enter context
-f.__exit__()           # Exit context
-
-# Iterator protocol
-f.__iter__()           # Return iterator (self)
-f.__next__()           # Return next line
-```
-
-### All os Module File Functions (Comprehensive)
-
-```python
-import os
-
-# Low-level file operations
-os.open(path, flags, mode=0o777)     # Open with flags
-os.close(fd)                         # Close file descriptor
-os.read(fd, n)                       # Read n bytes from fd
-os.write(fd, data)                   # Write bytes to fd
-os.lseek(fd, pos, how)               # Set file position
-os.fsync(fd)                         # Force write to disk
-os.fdatasync(fd)                     # Sync data only (faster)
-os.ftruncate(fd, length)             # Truncate file to length
-
-# File descriptor duplication
-os.dup(fd)                           # Duplicate fd
-os.dup2(fd, fd2)                     # Duplicate fd to fd2
-
-# Pipe operations
-os.pipe()                            # Create pipe, return (r, w)
-os.pipe2(flags)                      # Create pipe with flags
-
-# File info
-os.stat(path)                        # Get file status
-os.lstat(path)                       # Like stat, don't follow symlinks
-os.fstat(fd)                         # Stat by file descriptor
-os.stat_result                       # Result class with attributes
-
-# Directory operations
-os.mkdir(path, mode=0o777)           # Create directory
-os.makedirs(path, mode=0o777, exist_ok=False) # Recursive create
-os.rmdir(path)                       # Remove empty directory
-os.removedirs(path)                  # Remove empty parent directories
-os.listdir(path='.')                 # List directory contents
-os.scandir(path='.')                 # Efficient directory iterator
-os.walk(top, topdown=True)           # Recursive directory walk
-
-# File operations
-os.remove(path)                      # Delete file
-os.unlink(path)                      # Same as remove
-os.rename(src, dst)                  # Rename/move file
-os.replace(src, dst)                 # Atomic replace (overwrites)
-os.link(src, dst)                    # Create hard link
-os.symlink(src, dst)                 # Create symbolic link
-os.readlink(path)                    # Read symlink target
-os.realpath(path)                    # Resolve symlinks
-
-# Permissions and ownership
-os.chmod(path, mode)                 # Change file mode
-os.lchmod(path, mode)                # Like chmod, don't follow symlinks
-os.chown(path, uid, gid)             # Change owner (Unix)
-os.lchown(path, uid, gid)            # Like chown, don't follow symlinks
-os.chroot(path)                      # Change root directory
-os.access(path, mode)                # Check access permissions
-
-# Path operations
-os.path.exists(path)                 # Path exists?
-os.path.lexists(path)                # Like exists, symlink itself
-os.path.isfile(path)                 # Is regular file?
-os.path.isdir(path)                  # Is directory?
-os.path.islink(path)                 # Is symbolic link?
-os.path.ismount(path)                # Is mount point?
-os.path.getsize(path)                # Get file size in bytes
-os.path.getmtime(path)               # Last modification time
-os.path.getatime(path)               # Last access time
-os.path.getctime(path)               # Creation time (Windows) / metadata change (Unix)
-
-# Path manipulation
-os.path.abspath(path)                # Absolute path
-os.path.realpath(path)               # Canonical path (resolve symlinks)
-os.path.relpath(path, start='.')     # Relative path
-os.path.normpath(path)               # Normalize path
-os.path.normcase(path)               # Normalize case (Windows)
-os.path.join(path, *paths)           # Join paths
-os.path.split(path)                  # Split into (dir, file)
-os.path.splitdrive(path)             # Split drive (Windows)
-os.path.splitext(path)               # Split extension
-os.path.dirname(path)                # Get directory name
-os.path.basename(path)               # Get file name
-os.path.commonpath(paths)            # Common path
-os.path.commonprefix(paths)          # Common prefix (string-based)
-
-# Current directory
-os.getcwd()                          # Get current working directory
-os.chdir(path)                       # Change current directory
-os.fchdir(fd)                        # Change directory by fd
-
-# Temporary
-os.tmpfile()                         # Create temporary file (deprecated)
-
-# Advanced (Linux-specific)
-os.sendfile(out_fd, in_fd, offset, count) # Zero-copy transfer
-os.copy_file_range(src, dst, count)       # Copy file range (Linux 4.5+)
-os.splice(src, dst, count)                # Splice data between fds
-
-# File descriptor flags
-os.O_RDONLY          # Open for reading only
-os.O_WRONLY          # Open for writing only
-os.O_RDWR            # Open for reading and writing
-os.O_APPEND          # Append mode
-os.O_CREAT           # Create if doesn't exist
-os.O_EXCL            # Exclusive creation (fail if exists)
-os.O_TRUNC           # Truncate to zero length
-os.O_DSYNC           # Synchronous I/O (data)
-os.O_RSYNC           # Synchronous reads
-os.O_SYNC            # Synchronous I/O (data + metadata)
-os.O_NDELAY          # Non-blocking mode
-os.O_NONBLOCK        # Non-blocking mode
-os.O_NOCTTY          # Don't assign controlling terminal
-os.O_CLOEXEC         # Close on exec
-os.O_DIRECT          # Direct I/O (bypass cache)
-os.O_DIRECTORY       # Must be directory
-os.O_NOFOLLOW        # Don't follow symlinks
-os.O_NOATIME         # Don't update access time
-os.O_PATH            # Open for path operations only
-os.O_TMPFILE         # Create unnamed temporary file
-```
-
-### All shutil Module Functions (Complete)
-
-```python
-import shutil
-
-# Copying files
-shutil.copyfile(src, dst)            # Copy file content
-shutil.copymode(src, dst)            # Copy permissions
-shutil.copystat(src, dst)            # Copy all stat info
-shutil.copy(src, dst)                # Copy file with permissions
-shutil.copy2(src, dst)               # Copy file with metadata
-shutil.copytree(src, dst, symlinks=False, ignore=None) # Copy directory tree
-
-# Moving
-shutil.move(src, dst)                # Move file or directory
-
-# Removing
-shutil.rmtree(path, ignore_errors=False) # Remove directory tree
-
-# Disk usage
-shutil.disk_usage(path)              # Return (total, used, free)
-
-# Archiving
-shutil.make_archive(base_name, format, root_dir) # Create archive
-shutil.unpack_archive(filename, extract_dir)     # Extract archive
-shutil.get_archive_formats()         # List available formats
-shutil.register_archive_format()     # Register custom format
-shutil.unregister_archive_format()   # Unregister format
-
-# Terminal size
-shutil.get_terminal_size(fallback=(80, 24)) # Get terminal size
-
-# Finding executables
-shutil.which(cmd, mode=os.F_OK|os.X_OK, path=None) # Find executable
-
-# Ownership (Unix)
-shutil.chown(path, user=None, group=None) # Change owner
-```
-
-### All tempfile Module Functions
-
-```python
-import tempfile
-
-# Temporary files
-tempfile.TemporaryFile(mode='w+b', ...)  # Auto-deleted on close
-tempfile.NamedTemporaryFile(mode='w+b', delete=True, ...) # Has visible name
-tempfile.SpooledTemporaryFile(max_size, mode='w+b', ...) # In-memory until size
-
-# Temporary directories
-tempfile.TemporaryDirectory(suffix=None, prefix=None, dir=None) # Auto-deleted
-tempfile.mkdtemp(suffix=None, prefix=None, dir=None) # Manual cleanup needed
-
-# Temporary file names
-tempfile.mkstemp(suffix=None, prefix=None, dir=None, text=False) # Return (fd, path)
-tempfile.mktemp(suffix=None, prefix=None, dir=None) # Deprecated (insecure)
-
-# Configuration
-tempfile.gettempdir()                # Get temp directory path
-tempfile.gettempdirb()               # Get temp directory as bytes
-tempfile.gettempprefix()             # Get default prefix
-tempfile.gettempprefixb()            # Get prefix as bytes
-```
-
-### All pathlib Classes and Methods
-
-```python
-from pathlib import Path, PurePath, PosixPath, WindowsPath
-
-# Path classes
-Path            # Concrete path (current OS)
-PurePath        # Path without I/O operations
-PosixPath       # Unix/Linux concrete path
-WindowsPath     # Windows concrete path
-PurePosixPath   # Unix path without I/O
-PureWindowsPath # Windows path without I/O
-
-# Construction
-Path()                    # Current directory
-Path('/absolute/path')    # Absolute path
-Path('relative/path')     # Relative path
-Path.cwd()                # Current working directory
-Path.home()               # User home directory
-
-# Operators
-path1 / path2             # Join paths
-path / 'subdir' / 'file'  # Chain joins
-
-# Properties
-path.parts                # Tuple of path components
-path.drive                # Drive letter (Windows)
-path.root                 # Root ('/' or '\')
-path.anchor               # Drive + root
-path.parents              # Sequence of parents
-path.parent               # Immediate parent
-path.name                 # File name with extension
-path.suffix               # File extension (.txt)
-path.suffixes             # List of extensions (.tar.gz)
-path.stem                 # File name without extension
-
-# Checking
-path.exists()             # Path exists?
-path.is_file()            # Is file?
-path.is_dir()             # Is directory?
-path.is_symlink()         # Is symbolic link?
-path.is_socket()          # Is socket?
-path.is_fifo()            # Is named pipe?
-path.is_block_device()    # Is block device?
-path.is_char_device()     # Is character device?
-path.is_mount()           # Is mount point?
-path.is_absolute()        # Is absolute path?
-path.is_relative_to(other) # Is relative to other? (3.9+)
-path.is_reserved()        # Is reserved name? (Windows)
-
-# Reading/Writing
-path.read_text(encoding=None, errors=None)    # Read as text
-path.read_bytes()                              # Read as bytes
-path.write_text(data, encoding=None, errors=None) # Write text
-path.write_bytes(data)                         # Write bytes
-path.open(mode='r', ...)                       # Open file
-
-# File info
-path.stat()               # Get stat info
-path.lstat()              # Like stat, don't follow symlinks
-path.owner()              # Get owner name (Unix)
-path.group()              # Get group name (Unix)
-path.samefile(other)      # Same file as other?
-
-# Path operations
-path.absolute()           # Absolute path
-path.resolve(strict=False) # Canonical path (resolve symlinks)
-path.relative_to(other)   # Relative path to other
-path.as_posix()           # Path with forward slashes
-path.as_uri()             # File URI (file://...)
-path.match(pattern)       # Match glob pattern
-path.with_name(name)      # New path with different name
-path.with_stem(stem)      # New path with different stem (3.9+)
-path.with_suffix(suffix)  # New path with different extension
-
-# Directory operations
-path.iterdir()            # Iterate directory contents
-path.glob(pattern)        # Find matching paths
-path.rglob(pattern)       # Recursive glob
-path.mkdir(mode=0o777, parents=False, exist_ok=False) # Create directory
-path.rmdir()              # Remove empty directory
-
-# File operations
-path.touch(mode=0o666, exist_ok=True) # Create file or update timestamp
-path.unlink(missing_ok=False)         # Delete file
-path.rename(target)                   # Rename to target
-path.replace(target)                  # Replace target (overwrite)
-path.symlink_to(target)               # Create symlink to target
-path.hardlink_to(target)              # Create hard link (3.10+)
-path.link_to(target)                  # Create hard link (deprecated)
-path.readlink()                       # Read symlink target (3.9+)
-path.chmod(mode)                      # Change permissions
-path.lchmod(mode)                     # Change permissions, don't follow symlinks
-
-# Class methods
-Path.cwd()                # Current directory
-Path.home()               # Home directory
-```
-
-### Complete Error Handling Reference
-
-```python
-# All file-related exceptions hierarchy:
-
-BaseException
-├── Exception
-    ├── OSError                    # Base for I/O errors
-        ├── BlockingIOError        # Operation would block
-        ├── ChildProcessError      # Child process error
-        ├── ConnectionError        # Connection errors
-        ├── FileExistsError        # File already exists
-        ├── FileNotFoundError      # File doesn't exist
-        ├── InterruptedError       # System call interrupted
-        ├── IsADirectoryError      # Expected file, got directory
-        ├── NotADirectoryError     # Expected directory, got file
-        ├── PermissionError        # Permission denied
-        ├── ProcessLookupError     # Process not found
-        ├── TimeoutError           # Operation timed out
-    ├── EOFError                   # End of file
-    ├── UnicodeError               # Unicode errors
-        ├── UnicodeDecodeError     # Can't decode bytes
-        ├── UnicodeEncodeError     # Can't encode string
-        ├── UnicodeTranslateError  # Translation error
-
-# Handling patterns
+# BAD: Check-then-act race
+if not os.path.exists('file.txt'):
+    # File could be created here by another process!
+    with open('file.txt', 'w') as f:
+        f.write('data')
+
+# GOOD: Try-except
 try:
-    with open('file.txt', 'r') as f:
+    with open('file.txt', 'x') as f:  # Exclusive create
+        f.write('data')
+except FileExistsError:
+    pass
+
+# GOOD: Atomic operations
+# Use 'x' mode, file locks, or atomic writes
+```
+
+### **Path Separators**
+```python
+# BAD: Hardcoded separators
+path = 'folder/subfolder/file.txt'    # Fails on Windows
+path = 'folder\\subfolder\\file.txt'  # Fails on Unix
+
+# GOOD: os.path.join
+path = os.path.join('folder', 'subfolder', 'file.txt')
+
+# BETTER: pathlib
+path = Path('folder') / 'subfolder' / 'file.txt'
+```
+
+### **File Descriptor Leaks**
+```python
+# BAD: Multiple opens without close
+for i in range(10000):
+    f = open(f'file{i}.txt', 'r')
+    content = f.read()
+    # No close! Eventually hits OS limit
+
+# GOOD: Always close
+for i in range(10000):
+    with open(f'file{i}.txt', 'r') as f:
         content = f.read()
-except FileNotFoundError:
-    # File doesn't exist
-    pass
-except PermissionError:
-    # No permission to access
-    pass
-except IsADirectoryError:
-    # Path is a directory
-    pass
-except UnicodeDecodeError as e:
-    # Encoding mismatch
-    print(f"Can't decode at byte {e.start}")
-except OSError as e:
-    # Catch-all for other OS errors
-    print(f"OS error: {e.errno} - {e.strerror}")
 ```
 
-### Encoding Reference Table
+### **Writing Empty Files**
+```python
+# 'w' mode creates empty file immediately
+with open('file.txt', 'w') as f:
+    # File is now empty!
+    if error_condition:
+        return  # Original content lost!
+
+# Solution: Write to temp, then rename
+with tempfile.NamedTemporaryFile('w', delete=False) as tmp:
+    tmp.write(content)
+    temp_name = tmp.name
+
+os.replace(temp_name, 'file.txt')
+```
+
+## 28. Performance Benchmarks
 
 ```python
-# Encoding characteristics:
+import time
 
-ENCODINGS = {
-    'ascii': {
-        'bytes_per_char': 1,
-        'characters': 128,
-        'use_case': 'English only, legacy systems',
-        'pros': 'Simple, fast, compatible',
-        'cons': 'No international characters'
-    },
-    'utf-8': {
-        'bytes_per_char': '1-4 (variable)',
-        'characters': 'All Unicode (1.1M+)',
-        'use_case': 'Universal, web, modern systems',
-        'pros': 'ASCII-compatible, space-efficient, universal',
-        'cons': 'Variable-length complicates indexing'
-    },
-    'utf-16': {
-        'bytes_per_char': '2-4 (variable)',
-        'characters': 'All Unicode',
-        'use_case': 'Windows internals, Java',
-        'pros': 'Fixed-width for BMP characters',
-        'cons': 'BOM issues, not ASCII-compatible'
-    },
-    'utf-32': {
-        'bytes_per_char': 4,
-        'characters': 'All Unicode',
-        'use_case': 'Internal processing',
-        'pros': 'True fixed-width, O(1) indexing',
-        'cons': 'Space-inefficient (4x ASCII)'
-    },
-    'latin-1': {
-        'bytes_per_char': 1,
-        'characters': 256,
-        'use_case': 'Western Europe, HTTP headers',
-        'pros': 'Simple, never fails (accepts any byte)',
-        'cons': 'Limited character set'
-    },
-    'cp1252': {
-        'bytes_per_char': 1,
-        'characters': 256,
-        'use_case': 'Windows legacy',
-        'pros': 'Windows compatibility',
-        'cons': 'Platform-specific'
-    },
-    'gb2312': {
-        'bytes_per_char': '1-2',
-        'characters': 'Simplified Chinese',
-        'use_case': 'Chinese systems (mainland)',
-        'pros': 'Compact for Chinese',
-        'cons': 'Regional only'
-    },
-    'big5': {
-        'bytes_per_char': '1-2',
-        'characters': 'Traditional Chinese',
-        'use_case': 'Chinese systems (Taiwan)',
-        'pros': 'Compact for Chinese',
-        'cons': 'Regional only'
-    },
-    'shift_jis': {
-        'bytes_per_char': '1-2',
-        'characters': 'Japanese',
-        'use_case': 'Japanese systems',
-        'pros': 'Compact for Japanese',
-        'cons': 'Regional only'
-    }
-}
+# Benchmark: read methods
+file_size = 100_000_000  # 100MB
 
-# Choosing encoding:
-# 1. UTF-8: Default for everything
-# 2. ASCII: Only if absolutely sure English-only
-# 3. Latin-1: Interfacing with HTTP, binary-safe
-# 4. CP1252: Legacy Windows files
-# 5. Regional: Only if required by system
+# Method 1: read() - Fastest for small files
+start = time.time()
+with open('large.txt', 'r') as f:
+    content = f.read()
+print(f'read(): {time.time() - start:.2f}s')
+
+# Method 2: readlines() - Fast but memory-intensive
+start = time.time()
+with open('large.txt', 'r') as f:
+    lines = f.readlines()
+print(f'readlines(): {time.time() - start:.2f}s')
+
+# Method 3: readline() loop - Slow
+start = time.time()
+with open('large.txt', 'r') as f:
+    while f.readline():
+        pass
+print(f'readline(): {time.time() - start:.2f}s')
+
+# Method 4: iteration - Fast and memory-efficient
+start = time.time()
+with open('large.txt', 'r') as f:
+    for line in f:
+        pass
+print(f'iteration: {time.time() - start:.2f}s')
+
+# Typical results:
+# read(): 0.5s (loads all)
+# readlines(): 0.6s (loads all)
+# readline(): 3.0s (many function calls)
+# iteration: 0.5s (buffered, efficient)
 ```
 
-### Performance Benchmarks (Typical Values)
+## 29. Common Patterns
+
+### **Process Large File**
+```python
+def process_large_file(filename):
+    with open(filename, 'r') as f:
+        for line in f:
+            # Process line by line
+            data = parse(line)
+            yield data
+
+for record in process_large_file('huge.log'):
+    handle(record)
+```
+
+### **Read Configuration**
+```python
+def read_config(filename):
+    config = {}
+    try:
+        with open(filename, 'r') as f:
+            for line in f:
+                key, value = line.strip().split('=')
+                config[key] = value
+    except FileNotFoundError:
+        config = get_defaults()
+    return config
+```
+
+### **Backup Before Write**
+```python
+def safe_write(filename, content):
+    if os.path.exists(filename):
+        # Create backup
+        shutil.copy(filename, f'{filename}.bak')
+    
+    try:
+        with open(filename, 'w') as f:
+            f.write(content)
+    except:
+        # Restore backup on error
+        if os.path.exists(f'{filename}.bak'):
+            shutil.copy(f'{filename}.bak', filename)
+        raise
+```
+
+### **Tail File (Last N Lines)**
+```python
+def tail(filename, n=10):
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+        return lines[-n:]
+
+# Memory efficient (for huge files)
+from collections import deque
+
+def tail_efficient(filename, n=10):
+    with open(filename, 'r') as f:
+        return deque(f, maxlen=n)
+```
+
+### **Count Lines Efficiently**
+```python
+def count_lines(filename):
+    count = 0
+    with open(filename, 'rb') as f:
+        for line in f:
+            count += 1
+    return count
+
+# Faster for very large files
+def count_lines_fast(filename):
+    with open(filename, 'rb') as f:
+        return sum(1 for _ in f)
+
+# Even faster with buffer
+def count_lines_buffer(filename):
+    with open(filename, 'rb') as f:
+        return sum(chunk.count(b'\n') for chunk in iter(lambda: f.read(1024*1024), b''))
+```
+
+### **File Rotation**
+```python
+def rotate_file(filename, max_size=1024*1024):
+    """Rotate file when exceeds max_size"""
+    if not os.path.exists(filename):
+        return
+    
+    if os.path.getsize(filename) > max_size:
+        # Rename to .1, .2, etc.
+        i = 1
+        while os.path.exists(f'{filename}.{i}'):
+            i += 1
+        os.rename(filename, f'{filename}.{i}')
+```
+
+## 30. Best Practices Summary
+
+### **✅ DO:**
+```python
+# Always use context manager
+with open('file.txt', 'r') as f:
+    content = f.read()
+
+# Specify encoding explicitly
+with open('file.txt', 'r', encoding='utf-8') as f:
+    pass
+
+# Use pathlib for path operations
+from pathlib import Path
+p = Path('folder') / 'file.txt'
+
+# Iterate for large files
+for line in f:
+    process(line)
+
+# Use 'x' mode to prevent overwriting
+with open('file.txt', 'x') as f:
+    f.write('data')
+
+# Use binary mode for non-text
+with open('image.png', 'rb') as f:
+    data = f.read()
+
+# Check file exists before opening
+if Path('file.txt').exists():
+    pass
+
+# Use atomic writes for critical data
+# (write to temp, then rename)
+
+# Close files in finally block if not using context manager
+f = None
+try:
+    f = open('file.txt', 'r')
+finally:
+    if f:
+        f.close()
+```
+
+### **❌ DON'T:**
+```python
+# Don't forget to close
+f = open('file.txt', 'r')
+content = f.read()
+# No close!
+
+# Don't use system default encoding
+with open('file.txt', 'r') as f:  # Encoding depends on system!
+    pass
+
+# Don't read huge files with .read()
+content = open('huge.txt').read()  # Memory error!
+
+# Don't use 'w' mode carelessly
+with open('important.txt', 'w') as f:  # Erases content!
+    pass
+
+# Don't hardcode path separators
+path = 'folder\\file.txt'  # Fails on Unix
+
+# Don't ignore exceptions
+try:
+    f = open('file.txt', 'r')
+except:
+    pass  # Silent failure!
+
+# Don't modify file while reading
+with open('file.txt', 'r+') as f:
+    for line in f:
+        f.write(line.upper())  # Dangerous!
+
+# Don't assume file exists
+f = open('file.txt', 'r')  # May raise FileNotFoundError
+```
+
+## 31. Quick Reference
 
 ```python
-# Operation timings (approximate, varies by hardware):
+# OPEN
+with open('file.txt', 'r') as f:              # Read text
+with open('file.txt', 'w') as f:              # Write text (overwrites!)
+with open('file.txt', 'a') as f:              # Append text
+with open('file.bin', 'rb') as f:             # Read binary
+with open('file.txt', 'r', encoding='utf-8')  # Explicit encoding
 
-TIMINGS = {
-    'CPU operations': {
-        'Integer addition': '0.3 ns',
-        'Function call': '50 ns',
-        'List append': '100 ns',
-        'Dict lookup': '100 ns'
-    },
-    'Memory operations': {
-        'L1 cache hit': '1 ns',
-        'L2 cache hit': '4 ns',
-        'RAM access': '100 ns',
-        'Memory allocation': '100 ns'
-    },
-    'File operations': {
-        'Open file': '10 µs',
-        'Syscall overhead': '1 µs',
-        'Buffer read (8KB)': '1 µs',
-        'Buffer write (8KB)': '1 µs',
-        'fsync() to SSD': '1-5 ms',
-        'fsync() to HDD': '10-20 ms'
-    },
-    'Disk operations': {
-        'SSD random read (4KB)': '100 µs',
-        'SSD sequential read (1MB)': '200 µs',
-        'HDD seek': '5-10 ms',
-        'HDD random read (4KB)': '10 ms',
-        'HDD sequential read (1MB)': '20 ms'
-    },
-    'Network operations': {
-        'Ping localhost': '0.1 ms',
-        'Ping LAN': '1 ms',
-        'Ping Internet': '50-200 ms',
-        'NFS read (LAN)': '10-50 ms'
-    }
-}
+# READ
+f.read()                                      # Read all
+f.read(n)                                     # Read n bytes
+f.readline()                                  # Read one line
+f.readlines()                                 # Read all lines as list
+for line in f:                                # Iterate (best)
 
-# Key insights:
-# - RAM is 100,000x faster than HDD
-# - SSD is 100x faster than HDD for random access
-# - Buffering turns 10ms operations into 100ns operations
-# - Network adds 1-200ms latency on top of everything
+# WRITE
+f.write(string)                               # Write string
+f.writelines(list)                            # Write list of strings
+print('text', file=f)                         # Print to file
+
+# POSITION
+f.tell()                                      # Current position
+f.seek(0)                                     # Go to start
+f.seek(0, 2)                                  # Go to end
+
+# PROPERTIES
+f.closed                                      # Is closed?
+f.name                                        # Filename
+f.mode                                        # Mode ('r', 'w', etc.)
+
+# PATH (pathlib)
+from pathlib import Path
+p = Path('file.txt')
+p.exists()                                    # File exists?
+p.read_text()                                 # Read file
+p.write_text('data')                          # Write file
+p.unlink()                                    # Delete file
+
+# OS
+import os
+os.path.exists('file.txt')                    # Exists?
+os.path.getsize('file.txt')                   # Size in bytes
+os.remove('file.txt')                         # Delete
+shutil.copy('src.txt', 'dst.txt')             # Copy
 ```
 
-### File Size Strategy Matrix
+## 32. Final Reminders
 
-```python
-FILE_SIZE_STRATEGIES = {
-    '< 1 KB': {
-        'strategy': 'Read all into memory',
-        'method': 'f.read()',
-        'memory': 'O(n)',
-        'speed': 'Fastest',
-        'notes': 'No optimization needed'
-    },
-    '1 KB - 1 MB': {
-        'strategy': 'Read all or stream',
-        'method': 'f.read() or iteration',
-        'memory': 'O(n) or O(1)',
-        'speed': 'Fast',
-        'notes': 'Consider caching if read multiple times'
-    },
-    '1 MB - 100 MB': {
-        'strategy': 'Usually stream',
-        'method': 'for line in f:',
-        'memory': 'O(1)',
-        'speed': 'Good',
-        'notes': 'Read all if <10MB and enough RAM'
-    },
-    '100 MB - 1 GB': {
-        'strategy': 'Always stream',
-        'method': 'Iteration with chunks',
-        'memory': 'O(1)',
-        'speed': 'Good',
-        'notes': 'Consider mmap for random access'
-    },
-    '1 GB - 10 GB': {
-        'strategy': 'Stream + optimize',
-        'method': 'Chunks + processing pipeline',
-        'memory': 'O(1)',
-        'speed': 'Depends on processing',
-        'notes': 'Use generators, consider parallel processing'
-    },
-    '> 10 GB': {
-        'strategy': 'Specialized tools',
-        'method': 'Database, Spark, Hadoop',
-        'memory': 'Managed by tool',
-        'speed': 'Depends on cluster',
-        'notes': 'Consider if queries needed, use external tools'
-    }
-}
-```
+**🔑 Key Concepts:**
+- Files have buffers - data sits in memory before disk
+- Close files to flush buffers and release resources
+- Context managers (`with`) auto-close even on exception
+- Text mode handles encoding, binary mode doesn't
+- File position matters - reading moves the cursor
 
----
+**⚡ Performance:**
+- Iterate large files line-by-line, don't load all
+- Use larger buffer sizes for bulk I/O
+- Binary mode is faster than text mode
+- Batch writes instead of many small writes
 
-## Final Wisdom
+**🛡️ Safety:**
+- Always specify encoding for text files
+- Use `with` statement (context manager)
+- Use 'x' mode to prevent accidental overwrites
+- Atomic writes for critical data (temp + rename)
+- Handle FileNotFoundError gracefully
 
-### The Three Laws of File I/O
+**🐛 Common Mistakes:**
+- Forgetting to close files
+- Using 'w' mode on existing files (data loss!)
+- Reading entire large file into memory
+- Wrong/missing encoding
+- Modifying file while iterating
+- Platform-specific path separators
 
-**Law 1: Minimize Disk Access**
-- Disk is 100,000x slower than RAM
-- Buffer aggressively
-- Cache frequently accessed data
-- Batch operations
-
-**Law 2: Never Trust External State**
-- Files can disappear
-- Permissions can change
-- Disk can fill up
-- Always handle exceptions
-
-**Law 3: Resource Cleanup is Mandatory**
-- File descriptors are limited
-- Leaked FDs cause "too many open files"
-- Use context managers (`with`)
-- Clean up even on exceptions
-
-### The File Handling Zen
-
-```
-Beautiful is better than ugly.
-    → Use context managers, not manual close()
-
-Explicit is better than implicit.
-    → Always specify encoding='utf-8'
-
-Simple is better than complex.
-    → Stream large files, don't load all
-
-Flat is better than nested.
-    → Avoid deep directory nesting
-
-Sparse is better than dense.
-    → One file operation per logical step
-
-Readability counts.
-    → Use pathlib, not string concatenation
-
-Errors should never pass silently.
-    → Handle FileNotFoundError explicitly
-
-In the face of ambiguity, refuse the temptation to guess.
-    → Check file existence before opening
-
-There should be one-- and preferably only one --obvious way to do it.
-    → Context manager for file operations
-
-Now is better than never.
-    → Flush critical data immediately
-
-If the implementation is hard to explain, it's a bad idea.
-    → Simple file operations are best
-
-Namespaces are one honking great idea -- let's do more of those!
-    → Use Path objects, not string paths
-```
-
-### Closing Thoughts
-
-You've learned:
-- **The fundamentals**: Buffers, FDs, encoding, OS interaction
-- **The libraries**: 15+ libraries with real use cases
-- **The patterns**: 50+ production-ready patterns
-- **The pitfalls**: Common mistakes and how to avoid them
-- **The optimization**: Profiling, benchmarking, tuning
-- **The security**: Path traversal, race conditions, validation
-- **The architecture**: ETL pipelines, caching, queues, monitoring
-
-**You're now equipped to:**
-1. Handle files efficiently in any Python application
-2. Debug file I/O issues in production
-3. Optimize file operations based on profiling
-4. Secure file uploads and user-provided paths
-5. Build production-grade data processing pipelines
-6. Monitor and troubleshoot file I/O performance
-
-**Remember**: Great engineers don't just write code that works—they write code that's:
-- ✅ **Correct** (handles all edge cases)
-- ✅ **Efficient** (measured, not assumed)
-- ✅ **Secure** (validated and sanitized)
-- ✅ **Maintainable** (clear and documented)
-- ✅ **Robust** (recovers from failures)
-
-**Go build amazing things!** 
-
----
-
-## Acknowledgments
-
-This comprehensive guide covers Python file handling from basic concepts to expert-level production patterns. It represents years of accumulated knowledge, best practices from real-world systems, and insights from the Python community.
-
-**Key sources of wisdom:**
-- Python official documentation
-- Real production systems (web apps, data pipelines, ML systems)
-- Open source projects (Django, Flask, pandas, SQLAlchemy)
-- POSIX standards and OS internals
-- Security research (OWASP, CVE databases)
-- Performance engineering (profiling tools, benchmarks)
-
-**This guide is complete.** 📚✨
-
-Every concept explained. Every pattern documented. Every pitfall identified. Every optimization measured. You have everything needed to master Python file handling.
-
-**Happy coding!**
+**🎯 Best Tools:**
+- `pathlib` for modern path handling
+- Context managers for automatic cleanup
+- Iteration for memory-efficient reading
+- `shutil` for high-level file operations
+- `tempfile` for temporary files
