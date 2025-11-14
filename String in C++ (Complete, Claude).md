@@ -1,4 +1,4 @@
-# C++ String Deep Dive: Complete Reference
+# C++ String : Complete Reference
 
 ## 1. String Types in C++: Foundations and Comparison
 
