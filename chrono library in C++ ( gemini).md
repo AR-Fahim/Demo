@@ -1,6 +1,6 @@
 ## **C++ `<chrono>`: A Professional's Guide**
 
-This document provides a comprehensive guide to the `<chrono>` library, from its core philosophy to advanced C++20 features, real-world design patterns, and performance considerations.
+
 
 ### **1. The Core Philosophy: Type-Safe Time**
 
